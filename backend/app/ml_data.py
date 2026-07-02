@@ -131,6 +131,10 @@ def sample_persona(rng: random.Random, idx: int) -> Persona:
     ])
     incorp = _months_before(TODAY, age_months)
 
+    # New-to-Credit: young firms with no bureau footprint. By definition they
+    # carry no live loans, so their EMI burden is forced to zero below.
+    is_ntc = age_months < 18
+
     # Entity type
     if category == MsmeCategory.MEDIUM or (category == MsmeCategory.SMALL and rng.random() < 0.4):
         etype = rng.choices(
@@ -181,6 +185,22 @@ def sample_persona(rng: random.Random, idx: int) -> Persona:
         salary_reg = rng.uniform(0.45, 0.72)
         emi_burden = rng.uniform(0.15, 0.40) * turnover / 5
         growth = rng.uniform(-0.25, 0.02)
+
+    if is_ntc:
+        emi_burden = 0.0  # no credit history → no EMIs visible in bank data
+
+    # New-to-Bank: ~40% of the book banks elsewhere; their statements arrive
+    # through the AA rail rather than an in-house relationship.
+    is_ntb = rng.random() < 0.40
+    if is_ntb:
+        bank_name, ifsc_prefix, vpa_suffix = rng.choice([
+            ("HDFC Bank", "HDFC0", "@hdfcbank"),
+            ("State Bank of India", "SBIN0", "@sbi"),
+            ("Canara Bank", "CNRB0", "@cnrb"),
+            ("Bank of Baroda", "BARB0", "@barodampay"),
+        ])
+    else:
+        bank_name, ifsc_prefix, vpa_suffix = ("IDBI Bank", "IBKL0", "@idbi")
 
     # EPFO coverage: driven by employee count with some slack
     if employees >= 20:
@@ -256,6 +276,11 @@ def sample_persona(rng: random.Random, idx: int) -> Persona:
         employee_count=employees,
         monthly_wage_per_employee_lakhs=wage,
         salary_regularity=salary_reg,
+        bank_name=bank_name,
+        ifsc_prefix=ifsc_prefix,
+        vpa_suffix=vpa_suffix,
+        is_ntc=is_ntc,
+        is_ntb=is_ntb,
     )
 
 

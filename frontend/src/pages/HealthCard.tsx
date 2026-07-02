@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../api";
+import clsx from "clsx";
+import { api, clearConsent, storedConsent } from "../api";
 import type { HealthCard } from "../types";
 import HealthHeader from "../components/HealthHeader";
 import DimensionRadar from "../components/DimensionRadar";
@@ -10,18 +11,36 @@ import StrengthsRisks from "../components/StrengthsRisks";
 import DataFreshness from "../components/DataFreshness";
 import MlPanel from "../components/MlPanel";
 
+type View = "officer" | "borrower";
+
 export default function HealthCardPage() {
   const { gstin } = useParams();
   const [card, setCard] = useState<HealthCard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("officer");
 
   useEffect(() => {
     if (!gstin) return;
     setCard(null);
+    // Consent handle from the consent step; deep links fall back to the
+    // backend's documented demo auto-grant. A 403 means the stored handle
+    // went stale (e.g. backend restart wiped the in-memory registry) —
+    // drop it and retry once without.
+    const consent = storedConsent(gstin);
     api
-      .healthCard(gstin)
+      .healthCard(gstin, consent)
       .then(setCard)
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        if (consent && String(e).startsWith("Error: 403")) {
+          clearConsent(gstin);
+          api
+            .healthCard(gstin)
+            .then(setCard)
+            .catch((e2) => setError(String(e2)));
+        } else {
+          setError(String(e));
+        }
+      });
   }, [gstin]);
 
   if (error) {
@@ -38,6 +57,9 @@ export default function HealthCardPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8 space-y-6">
+      <div className="flex justify-end">
+        <ViewToggle view={view} onChange={setView} />
+      </div>
       <HealthHeader card={card} />
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <section className="card p-6">
@@ -51,10 +73,14 @@ export default function HealthCardPage() {
           </div>
           <DimensionRadar dimensions={card.dimensions} />
         </section>
-        <DecisionPanel decision={card.decision} band={card.risk_band} />
+        {view === "officer" ? (
+          <DecisionPanel decision={card.decision} band={card.risk_band} />
+        ) : (
+          <BorrowerPanel card={card} />
+        )}
       </div>
 
-      <MlPanel ml={card.ml_assessment} />
+      {view === "officer" && <MlPanel ml={card.ml_assessment} />}
 
       <StrengthsRisks
         strengths={card.top_strengths}
@@ -74,6 +100,80 @@ export default function HealthCardPage() {
 
       <DataFreshness card={card} />
     </div>
+  );
+}
+
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: View;
+  onChange: (v: View) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-ink-200 bg-white p-1 text-xs">
+      {(
+        [
+          ["officer", "Credit officer view"],
+          ["borrower", "Borrower view"],
+        ] as const
+      ).map(([k, label]) => (
+        <button
+          key={k}
+          onClick={() => onChange(k)}
+          className={clsx(
+            "px-2.5 py-1 rounded-lg transition",
+            view === k
+              ? "bg-brand-600 text-white"
+              : "text-ink-600 hover:bg-ink-50",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const BAND_PLAIN: Record<string, string> = {
+  A: "Your business signals look strong — you would typically qualify for credit on good terms.",
+  B: "Your business signals are sound — you would typically qualify for credit at standard terms.",
+  C: "Your profile is borderline — a lender would likely review it manually before deciding.",
+  D: "Your current signals would make credit difficult — the points below show what to improve.",
+};
+
+// The same scored card, in plain language for the MSME owner: what the band
+// means, what's working, and what to improve — no underwriter internals.
+function BorrowerPanel({ card }: { card: HealthCard }) {
+  return (
+    <section className="card p-6">
+      <h2 className="text-sm font-semibold text-ink-900">
+        What this means for your business
+      </h2>
+      <p className="mt-2 text-sm text-ink-700">{BAND_PLAIN[card.risk_band]}</p>
+      {card.top_risks.length > 0 && (
+        <div className="mt-4">
+          <div className="text-[10px] uppercase tracking-wider text-ink-500">
+            To improve your score
+          </div>
+          <ul className="mt-1.5 space-y-1.5 text-xs text-ink-700 list-disc pl-4">
+            {card.top_risks.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {card.top_risks.length === 0 && (
+        <p className="mt-4 text-xs text-ink-600">
+          No major risk signals right now — keep filings and repayments on
+          time to hold this score.
+        </p>
+      )}
+      <p className="mt-4 text-[11px] text-ink-500">
+        Score built only from data you consented to share (GST, bank, EPFO,
+        UPI). You can revoke consent at any time.
+      </p>
+    </section>
   );
 }
 

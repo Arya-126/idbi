@@ -10,8 +10,12 @@ Portfolio quality metrics returned:
   · Sector mix
   · Recommendation mix
   · Total exposure = Σ suggested_limit for APPROVED / REFER entries
-  · Watchlist = REFER + DECLINE + PD>15% + hard-gates
-  · NTC/NTB count = incorporated <18 months, approved anyway
+  · Watchlist = REFER + DECLINE + ML PD>20%
+  · NTC/NTB count = flagged NTC (no bureau footprint) or NTB (banks
+    elsewhere, data via AA), approved anyway
+
+The summary is cached after the first build; POST /api/portfolio/refresh
+invalidates and rebuilds it.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from datetime import datetime
 
 from . import personas
 from .ml_data import sample_persona
-from .personas import TODAY, Persona
+from .personas import Persona
 from .schemas import (
     PortfolioBucket,
     PortfolioEntry,
@@ -36,20 +40,26 @@ PORTFOLIO_SEED = 20260702
 
 
 _summary: PortfolioSummary | None = None
+_sampled: list[Persona] = []
 
 
 def _register_sampled_personas(n: int, seed: int) -> list[Persona]:
-    """Sample and register n personas so they're addressable by GSTIN."""
+    """Sample and register n personas so they're addressable by GSTIN.
+
+    Idempotent: the book membership is sampled once per process, so a
+    refresh re-scores the same 30 firms instead of growing the registry.
+    """
+    if _sampled:
+        return _sampled
     rng = random.Random(seed)
-    fresh: list[Persona] = []
     for i in range(n):
         while True:
             p = sample_persona(rng, i)
             if p.gstin not in personas.PERSONAS_BY_GSTIN:
                 break  # unique GSTIN
         personas.PERSONAS_BY_GSTIN[p.gstin] = p
-        fresh.append(p)
-    return fresh
+        _sampled.append(p)
+    return _sampled
 
 
 def _build_entry(p: Persona) -> PortfolioEntry:
@@ -80,13 +90,11 @@ def _build_entry(p: Persona) -> PortfolioEntry:
         monthly_turnover_paise=int(p.monthly_turnover_lakhs * 10_000_000),
         suggested_limit_paise=card.decision.suggested_limit_paise,
         is_demo=p.gstin in demo_gstins,
+        is_ntc=p.is_ntc,
+        is_ntb=p.is_ntb,
         is_watchlist=len(reasons) > 0,
         watchlist_reason=" · ".join(reasons) if reasons else None,
     )
-
-
-def _months_between(a, b) -> int:
-    return (b.year - a.year) * 12 + (b.month - a.month)
 
 
 def _buckets(counts: Counter, total: int, labels: dict[str, str] | None = None) -> list[PortfolioBucket]:
@@ -107,9 +115,9 @@ def build_portfolio() -> PortfolioSummary:
     if _summary is not None:
         return _summary
 
-    _register_sampled_personas(PORTFOLIO_SIZE, PORTFOLIO_SEED)
+    sampled = _register_sampled_personas(PORTFOLIO_SIZE, PORTFOLIO_SEED)
 
-    all_personas = list(personas.PERSONAS_BY_GSTIN.values())
+    all_personas = personas.PERSONAS + sampled
     entries = [_build_entry(p) for p in all_personas]
     total = len(entries)
 
@@ -118,12 +126,8 @@ def build_portfolio() -> PortfolioSummary:
     rec_counts = Counter(e.recommendation for e in entries)
 
     ntc_ntb = sum(
-        1 for p in all_personas
-        if _months_between(p.incorporation_date, TODAY) < 18
-        and any(
-            e.gstin == p.gstin and e.recommendation == "APPROVE"
-            for e in entries
-        )
+        1 for e in entries
+        if (e.is_ntc or e.is_ntb) and e.recommendation == "APPROVE"
     )
 
     total_exposure = sum(

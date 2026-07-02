@@ -4,7 +4,7 @@ import type { MlAssessment, MlDriver } from "../types";
 export default function MlPanel({ ml }: { ml: MlAssessment }) {
   const pdPct = ml.probability_of_default * 100;
   const zone = pdPct < 5 ? "safe" : pdPct < 15 ? "watch" : pdPct < 30 ? "elevated" : "high";
-  const agrees = ml.summary.startsWith("Model agrees");
+  const agrees = ml.agrees_with_rulebook;
 
   return (
     <section className="card p-6">
@@ -88,6 +88,8 @@ export default function MlPanel({ ml }: { ml: MlAssessment }) {
 
       <div className="mt-4 text-[10px] text-ink-400 font-mono">
         model {ml.model_version}
+        {ml.holdout_auc != null &&
+          ` · holdout AUC ${ml.holdout_auc.toFixed(2)}`}
       </div>
     </section>
   );

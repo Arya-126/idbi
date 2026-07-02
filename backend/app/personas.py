@@ -35,8 +35,11 @@ from .schemas import (
     UpiProfile,
 )
 
-# Reference "today" so the demo is deterministic. Data goes back from here.
-TODAY = date(2026, 7, 2)
+# Reference "today" for data generation. Dynamic so freshness stays current
+# on any demo day; determinism comes from GSTIN-seeded RNGs (same GSTIN on the
+# same day always yields identical data — months simply roll forward with the
+# calendar).
+TODAY = date.today()
 
 # Convenience: ₹1 lakh in paise = 1e5 rupees × 100 paise = 1e7 paise
 L_PAISE = 10_000_000  # one lakh in paise
@@ -93,6 +96,19 @@ class Persona:
     bank_name: str = "IDBI Bank"
     ifsc_prefix: str = "IBKL0"
     vpa_suffix: str = "@idbi"
+
+    # Inclusion flags
+    is_ntc: bool = False  # New-to-Credit: no bureau footprint, no live loans
+    is_ntb: bool = False  # New-to-Bank: banks elsewhere; data still flows via AA
+
+
+def _rel_month_start(months_back: int, day: int = 4) -> date:
+    """A date `months_back` months before TODAY — for age-anchored personas."""
+    y, m = TODAY.year, TODAY.month - months_back
+    while m <= 0:
+        m += 12
+        y -= 1
+    return date(y, m, day)
 
 
 # ─── Persona registry ───────────────────────────────────────────────────────
@@ -210,7 +226,8 @@ PERSONAS: list[Persona] = [
         msme_category=MsmeCategory.MICRO,
         registered_state="Delhi",
         registered_city="New Delhi",
-        incorporation_date=date(2025, 9, 4),
+        # Anchored to TODAY so the "10-month-old" story never ages out.
+        incorporation_date=_rel_month_start(10),
         tagline="10-month-old NTC startup — no bureau history, strong signals",
         monthly_turnover_lakhs=14.0,
         growth_yoy=0.45,
@@ -230,6 +247,13 @@ PERSONAS: list[Persona] = [
         employee_count=12,
         monthly_wage_per_employee_lakhs=0.75,
         salary_regularity=1.0,
+        # NTC and NTB: no bureau footprint, and banks elsewhere — the AA rail
+        # is what lets this bank see its cash flows at all.
+        bank_name="HDFC Bank",
+        ifsc_prefix="HDFC0",
+        vpa_suffix="@hdfcbank",
+        is_ntc=True,
+        is_ntb=True,
     ),
     Persona(
         gstin="24AAMPH9876E1Z7",
@@ -263,6 +287,11 @@ PERSONAS: list[Persona] = [
         employee_count=4,
         monthly_wage_per_employee_lakhs=0.20,
         salary_regularity=0.95,
+        # NTB: existing relationship with another bank, consented via AA.
+        bank_name="Bank of Baroda",
+        ifsc_prefix="BARB0",
+        vpa_suffix="@barodampay",
+        is_ntb=True,
     ),
 ]
 
@@ -287,6 +316,23 @@ def list_summaries() -> list[MsmeSummary]:
 
 def get_persona(gstin: str) -> Persona | None:
     return PERSONAS_BY_GSTIN.get(gstin)
+
+
+def identity_for(persona: Persona) -> EnterpriseIdentity:
+    return EnterpriseIdentity(
+        gstin=persona.gstin,
+        udyam_number=persona.udyam_number,
+        pan=persona.pan,
+        legal_name=persona.legal_name,
+        trade_name=persona.trade_name,
+        incorporation_date=persona.incorporation_date,
+        entity_type=persona.entity_type,
+        sector=persona.sector,
+        sub_sector=persona.sub_sector,
+        msme_category=persona.msme_category,
+        registered_state=persona.registered_state,
+        registered_city=persona.registered_city,
+    )
 
 
 # ─── Generators ─────────────────────────────────────────────────────────────
@@ -610,20 +656,7 @@ def build_data_pack(gstin: str) -> DataPack | None:
     if not persona:
         return None
     rng = random.Random(_seed(gstin))
-    identity = EnterpriseIdentity(
-        gstin=persona.gstin,
-        udyam_number=persona.udyam_number,
-        pan=persona.pan,
-        legal_name=persona.legal_name,
-        trade_name=persona.trade_name,
-        incorporation_date=persona.incorporation_date,
-        entity_type=persona.entity_type,
-        sector=persona.sector,
-        sub_sector=persona.sub_sector,
-        msme_category=persona.msme_category,
-        registered_state=persona.registered_state,
-        registered_city=persona.registered_city,
-    )
+    identity = identity_for(persona)
     gst = GstProfile(
         gstin=persona.gstin,
         registration_date=persona.incorporation_date,

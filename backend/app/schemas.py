@@ -211,6 +211,8 @@ class MlAssessment(BaseModel):
     supports: list[MlDriver]  # pull PD down
     model_version: str
     trained_on_n_samples: int
+    holdout_auc: float | None = None  # AUC on the 20% holdout at train time
+    agrees_with_rulebook: bool
     summary: str  # one-line agreement/disagreement with the rulebook decision
 
 
@@ -224,9 +226,10 @@ class HealthCard(BaseModel):
     decision: Decision
     ml_assessment: MlAssessment
     generated_at: datetime
-    data_freshness: dict[str, date]
+    data_freshness: dict[str, date | None]  # None = source not available
     disclaimer: str = (
-        "Score generated from consented alternate data via ULI/OCEN/AA rails. "
+        "Score generated from consented alternate data over an Account "
+        "Aggregator-style consent flow (ULI/OCEN-ready connector seams). "
         "Advisory only — final credit decision rests with the underwriter."
     )
 
@@ -285,6 +288,8 @@ class PortfolioEntry(BaseModel):
     monthly_turnover_paise: int
     suggested_limit_paise: int
     is_demo: bool  # true for the 5 hand-authored personas
+    is_ntc: bool   # New-to-Credit: no bureau footprint (young firm, no live loans)
+    is_ntb: bool   # New-to-Bank: banks elsewhere; data arrives via the AA rail
     is_watchlist: bool
     watchlist_reason: str | None = None
 

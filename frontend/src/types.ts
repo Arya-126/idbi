@@ -75,6 +75,8 @@ export interface MlAssessment {
   supports: MlDriver[];
   model_version: string;
   trained_on_n_samples: number;
+  holdout_auc: number | null;
+  agrees_with_rulebook: boolean;
   summary: string;
 }
 
@@ -88,7 +90,7 @@ export interface HealthCard {
   decision: Decision;
   ml_assessment: MlAssessment;
   generated_at: string;
-  data_freshness: Record<string, string>;
+  data_freshness: Record<string, string | null>; // null = source not available
   disclaimer: string;
 }
 
@@ -113,6 +115,8 @@ export interface PortfolioEntry {
   monthly_turnover_paise: number;
   suggested_limit_paise: number;
   is_demo: boolean;
+  is_ntc: boolean;
+  is_ntb: boolean;
   is_watchlist: boolean;
   watchlist_reason: string | null;
 }
@@ -138,4 +142,14 @@ export interface ConsentGrant {
   granted_at: string;
   expires_at: string;
   status: ConsentStatus;
+}
+
+// Slim view of the backend DataPack — only what the consent page needs to
+// show real per-source pull results.
+export interface DataPackLite {
+  gst: { returns: unknown[] };
+  aa: { linked_accounts: { transactions: unknown[] }[] };
+  epfo: { active: boolean; monthly: unknown[] };
+  upi: { monthly: unknown[] };
+  fetched_at: string;
 }

@@ -14,10 +14,10 @@ Banks evaluate MSME (Micro, Small & Medium Enterprise) credit using traditional 
 
 A platform that:
 
-1. **Aggregates alternate data** — GST returns, UPI transaction patterns, Account Aggregator (AA) bank data, EPFO payroll records, utility payments, etc.
+1. **Aggregates alternate data** — GST returns, UPI transaction patterns, Account Aggregator (AA) bank data, EPFO payroll records. (Utility payments appear as categorized transactions inside the AA bank data — they are not a separately connected or scored source. Bureau and ITR connectors are deliberately absent; the demo is bureau-free by design.)
 2. **Computes a multidimensional financial health score** — not a single opaque number, but scored dimensions (e.g., revenue consistency, cash-flow health, compliance discipline, payroll stability, growth trajectory, sector risk).
-3. **Visualizes strengths and risks** — a "Financial Health Card" UI that a credit officer (and the MSME itself) can read at a glance, with explainability for every score component.
-4. **Integrates with ULI / OCEN / AA ecosystems** — designed around India's digital public infrastructure rails for lending.
+3. **Visualizes strengths and risks** — a "Financial Health Card" UI that a credit officer (and the MSME itself, via the borrower-view toggle) can read at a glance, with explainability for every score component.
+4. **Designed for ULI / OCEN / AA ecosystems** — an AA-style consent flow is implemented and enforced (grants registered, validated on every pull, expirable, revocable); ULI/OCEN integration is a connector-seam story (protocol contracts ready for real adapters), not a wire-level API contract in the demo. Pitch it as "AA consent-first, ULI/OCEN-ready" — never claim live ULI/OCEN integration.
 5. **Enables near-real-time credit assessment** — score on demand from live/recent data pulls, not stale documents.
 6. **Expands onboarding of credit-invisible MSMEs while improving portfolio quality** — the score must be usable for approve/refer/decline decisioning and portfolio monitoring.
 
@@ -41,9 +41,9 @@ Claude should know these terms; they appear throughout the project:
 
 ## Guiding Principles
 
-- **Explainability is non-negotiable.** Every score must decompose into named factors with human-readable reasons. Prefer interpretable models (gradient boosting + SHAP, scorecards) over black boxes. RBI/regulatory expectations for lending models demand this.
-- **Consent-first data flows.** All data pulls are modeled as consent-driven (AA consent artefacts, GST OTP consent). Never design a flow that assumes scraping or unconsented access.
-- **Mock the rails, keep the contracts real.** For the hackathon we simulate GST/AA/EPFO/UPI responses, but mock APIs must follow the real schemas (ReBIT FI data schema for AA, GSTN API shapes) so integration is a swap, not a rewrite.
+- **Explainability is non-negotiable.** Every score must decompose into named factors with human-readable reasons. Prefer interpretable models (gradient boosting with local counterfactual attribution — the demo's explainer; SHAP is the production upgrade — plus scorecards) over black boxes. RBI/regulatory expectations for lending models demand this.
+- **Consent-first data flows.** Consent is enforced, not decorative: `POST /api/consent` registers a grant in the in-memory registry (`app/consent.py`); data endpoints validate a supplied `?consent=` handle (unknown / revoked / expired → 403); grants are revocable via `POST /api/consent/{id}/revoke`. One documented demo exception: pulls without a handle auto-issue a grant ("consent on file") so deep links and the startup portfolio build work — production would reject instead. Never design a flow that assumes scraping or unconsented access.
+- **Mock the rails, keep the contracts practical.** For the hackathon we simulate GST/AA/EPFO/UPI responses behind per-rail connector protocols. The normalized internal schemas are *inspired by* the real ones (the AA shape loosely follows the ReBIT FI deposit schema; GST is a normalized monthly summary, not raw GSTR-1/3B payloads). A real integration means writing a raw-payload normalization adapter behind the existing protocol — downstream code doesn't change, but it is adapter work, not a pure wiring swap. Don't claim field-level ReBIT/GSTN fidelity.
 - **Score dimensions over a single number.** The headline score is derived from dimension scores; the card visualizes the dimensions.
 - **Demo-ready over production-ready.** This is a hackathon: prioritize a compelling end-to-end demo (onboard → consent → data pull → score → health card → lending decision) with realistic synthetic data. Note production concerns in comments/docs rather than building them.
 
@@ -56,21 +56,22 @@ Claude should know these terms; they appear throughout the project:
 └─────────────┘   └──────────────────┘   └───────────────┘
                           │
                 ┌─────────┴──────────┐
-                │  Data Connectors    │  ← mock adapters, real schemas
-                │  GST · AA · EPFO ·  │
-                │  UPI · Bureau       │
+                │  Data Connectors    │  ← mock adapters behind protocols
+                │  Identity · GST ·   │
+                │  AA · EPFO · UPI    │
                 └────────────────────┘
 ```
 
 - `backend/app/schemas.py` — all Pydantic models: enterprise identity, per-source normalized shapes (GST/AA/EPFO/UPI), and HealthCard output.
-- `backend/app/personas.py` — 5 synthetic MSME "personas" (Sharma Textiles, Kirana Bazaar, Kumar Enterprises, NewGen Tech, Meera Handicrafts) and the deterministic data generator that turns persona knobs into realistic GST/AA/EPFO/UPI payloads seeded by GSTIN.
-- `backend/app/connectors/` — thin adapters implementing `GstConnector` / `AaConnector` / `EpfoConnector` / `UpiConnector` protocols. Mock impls dispatch to `personas.build_data_pack`; real impls would call GSTN / AA / EPFO / NPCI.
-- `backend/app/scoring/` — feature engineering (`features.py`), the six dimension scorers with factor decomposition (`dimensions.py`), composite/decision logic (`decision.py`), and the orchestrator that assembles a `HealthCard` (`engine.py`). Weights live in `dimensions.WEIGHTS` — adjust in one place.
-- `backend/app/main.py` — FastAPI app: `/api/msme`, `/api/consent`, `/api/msme/{gstin}/data-pack`, `/api/msme/{gstin}/health-card`, `/api/portfolio`. `startup` hook trains the ML model and pre-builds the portfolio cache so first requests are fast.
-- `backend/app/ml_data.py` — synthetic-population sampler + ground-truth default simulator. Same generator serves both ML training and the portfolio "book" view.
-- `backend/app/ml.py` — `PdModel` (scikit-learn `HistGradientBoostingClassifier`) with a canonical 18-feature vector, local counterfactual explainer (drivers / supports), and version hash. Training uses a fast persona-to-features shortcut; scoring uses production features from the connectors.
-- `backend/app/portfolio.py` — assembles the 30-MSME book (5 demos + 25 sampled), scores each, and caches summary metrics (band mix, sector mix, recommendation mix, exposure, watchlist, NTC/NTB count).
-- `frontend/src/pages/` — four routes: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow) → `HealthCard` (full scored card with ML panel) and `Portfolio` (credit-officer book view).
+- `backend/app/personas.py` — 5 synthetic MSME "personas" (Sharma Textiles, Kirana Bazaar, Kumar Enterprises, NewGen Tech, Meera Handicrafts) and the deterministic data generator that turns persona knobs into realistic GST/AA/EPFO/UPI payloads seeded by GSTIN. `TODAY` is dynamic (`date.today()`), so freshness stays current on any demo day; the NTC persona's incorporation date is anchored relative to `TODAY` so its "10-month-old" story never ages out. Personas carry `is_ntc` / `is_ntb` flags (NTB personas bank with other banks — their data arrives via the AA rail).
+- `backend/app/consent.py` — in-memory consent registry: issue, validate (GSTIN match / status / expiry), revoke, and a documented demo fallback that auto-issues a grant when a pull arrives without a handle.
+- `backend/app/connectors/` — thin adapters implementing `IdentityConnector` / `GstConnector` / `AaConnector` / `EpfoConnector` / `UpiConnector` protocols; `ConnectorSet` (in `base.py`) is typed against the protocols so the engine never imports mock classes. Mock impls dispatch to `personas.build_data_pack`; the mock AA connector rejects unknown/revoked/expired consent handles. Real impls would call GSTN / AA / EPFO / NPCI.
+- `backend/app/scoring/` — feature engineering (`features.py`, including time-series trend features: filing-timeliness trend, balance trajectory, EMI trajectory), the six dimension scorers with factor decomposition (`dimensions.py`), composite/decision logic (`decision.py` — top strengths/risks ranked by contribution × dimension weight), and the orchestrator that assembles a `HealthCard` (`engine.py`). Weights live in `dimensions.WEIGHTS` — adjust in one place.
+- `backend/app/main.py` — FastAPI app: `/api/msme`, `/api/consent` (+ `/api/consent/{id}/revoke`), `/api/msme/{gstin}/data-pack`, `/api/msme/{gstin}/health-card` (both accept `?consent=`), `/api/portfolio` (+ `/api/portfolio/refresh`). `startup` hook trains the ML model and pre-builds the portfolio cache so first requests are fast.
+- `backend/app/ml_data.py` — synthetic-population sampler + ground-truth default simulator. Same generator serves both ML training and the portfolio "book" view. NTC sampled firms carry no EMIs (no credit history by definition); ~40% of the book is NTB.
+- `backend/app/ml.py` — `PdModel` (scikit-learn `HistGradientBoostingClassifier`) with a canonical 18-feature vector, an 80/20 holdout AUC computed at train time (surfaced on the card), local counterfactual explainer (drivers / supports), and version hash. Training uses a fast persona-to-features shortcut; scoring uses production features from the connectors — a known, documented train/serve skew (see the docstring in `ml.py`).
+- `backend/app/portfolio.py` — assembles the 30-MSME book (5 demos + 25 sampled), scores each, and caches summary metrics (band mix, sector mix, recommendation mix, exposure, watchlist, flag-based NTC/NTB count). Cache is dropped via `POST /api/portfolio/refresh`.
+- `frontend/src/pages/` — four routes: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow; performs a real `/data-pack` pull with the issued handle and shows actual record counts) → `HealthCard` (full scored card with ML panel, plus a credit-officer / borrower view toggle; the consent handle rides along via sessionStorage) and `Portfolio` (credit-officer book view with NTC/NTB filter + re-score button).
 - `frontend/src/components/` — `HealthHeader`, `ScoreDial` (custom SVG dial), `DimensionRadar` (Recharts), `DimensionCard`, `DecisionPanel`, `StrengthsRisks`, `MlPanel` (ML PD + drivers/supports), `DataFreshness`.
 - `frontend/src/api.ts` — thin fetch client; `types.ts` mirrors backend schemas (kept in sync manually).
 
@@ -81,13 +82,15 @@ Dimensions (each 0–100, weighted into composite):
 1. **Revenue Health** — GST turnover level, growth trend, seasonality (GSTR-1/3B)
 2. **Cash-Flow Strength** — AA bank data: inflow/outflow ratio, balance volatility, bounce/return incidents
 3. **Digital Transaction Vitality** — UPI velocity, customer-count diversity, ticket-size distribution
-4. **Compliance Discipline** — GST filing timeliness, EPFO deposit regularity, ITR filing
+4. **Compliance Discipline** — GST filing timeliness, EPFO deposit regularity (ITR filing is a planned production signal — no ITR connector exists in the demo)
 5. **Employment Stability** — EPFO headcount trend, salary payment regularity
-6. **Obligation & Leverage** — existing EMIs/obligations visible in bank statements; bureau data if available
+6. **Obligation & Leverage** — existing EMIs/obligations inferred from bank-statement debits only. There is no bureau connector anywhere — deliberately, since the pitch is scoring the bureau-less; a bureau adapter ("bureau if available") is a production add-on behind the same connector pattern.
 
 Composite → risk bands (e.g., A/B/C/D) → decision recommendation (approve / refer / decline) with suggested limit derived from cash-flow surplus.
 
-**In parallel, an ML "second opinion":** a `HistGradientBoostingClassifier` trained at startup on ~500 synthetic MSMEs (with ground-truth default outcomes from a hidden logistic simulator over the persona knobs) predicts a 12-month probability of default from the same 18 observable features. Local explanations come from counterfactual deltas — replace each feature with its population median and measure the PD change. Top-3 up = drivers; top-3 down = supports. The card surfaces whether the ML PD "agrees" or "disagrees" with the rulebook so an underwriter can flag divergent cases.
+**In parallel, an ML "second opinion":** a `HistGradientBoostingClassifier` trained at startup on ~500 synthetic MSMEs (with ground-truth default outcomes from a hidden logistic simulator over the persona knobs) predicts a 12-month probability of default from the same 18 observable features, with an 80/20 holdout AUC reported on the card. Local explanations come from counterfactual deltas — replace each feature with its population median and measure the PD change. Top-3 up = drivers; top-3 down = supports. The card carries a structured `agrees_with_rulebook` flag so an underwriter can spot divergent cases. **The ML PD is advisory only — the approve/refer/decline decision, limit and tenor come from the rule-based scorecard alone (champion/challenger framing). If a judge asks whether the model affects the decision, the honest answer is no, by design.**
+
+**Known ML honesty caveats (state them, don't hide them):** training labels come from a hand-authored simulator over the same knobs that generate the features, so the model has no real-world validity or calibration; the model is retrained in-process at every boot and never persisted; training features are analytic approximations while scoring features come from generated series (train/serve skew, documented in `ml.py`).
 
 ## Conventions
 
@@ -116,10 +119,12 @@ npm run build          # production build (also runs `tsc`)
 **API surface** (all under `http://localhost:8000`):
 - `GET /health` — liveness
 - `GET /api/msme` — list demo MSMEs
-- `POST /api/consent` — mock consent handle
-- `GET /api/msme/{gstin}/data-pack` — normalized GST + AA + EPFO + UPI
-- `GET /api/msme/{gstin}/health-card` — full scored card + ML PD
-- `GET /api/portfolio` — 30-MSME book with band/sector/recommendation mix and watch-list
+- `POST /api/consent` — issue + register a consent grant (enforced downstream)
+- `POST /api/consent/{id}/revoke` — revoke a grant
+- `GET /api/msme/{gstin}/data-pack?consent=` — normalized GST + AA + EPFO + UPI (bad handle → 403)
+- `GET /api/msme/{gstin}/health-card?consent=` — full scored card + ML PD (bad handle → 403)
+- `GET /api/portfolio` — 30-MSME book with band/sector/recommendation mix and watch-list (cached at startup)
+- `POST /api/portfolio/refresh` — invalidate + re-score the book
 - Interactive docs at `/docs`
 
 **Sanity checks:**
@@ -129,6 +134,13 @@ cd backend && python -c "from app.scoring.engine import score_gstin; from app.pe
 ```
 
 **Preview launcher** — `.claude/launch.json` defines `backend` (port 8000) and `frontend` (port 5173). Use `preview_start` in Claude Code to run either.
+
+## Known Demo Limitations (state them if asked — never hide them)
+
+- **Deterministic mock data**: connectors dispatch to a GSTIN-seeded generator, so pulling the same GSTIN twice on the same day yields identical data — there is no way to demo a fresh pull changing a score. The on-demand compute path is real; the "live" data is simulated.
+- **Portfolio quality is a snapshot**, not a time series: the book shows band/sector/recommendation mix, exposure and a watch-list, and can be re-scored on demand, but there is no before/after trend or watch-list action workflow.
+- **NTC/NTB is modeled, not sourced**: personas carry explicit `is_ntc`/`is_ntb` flags (NTC = young + no live loans, NTB = banks elsewhere via AA) rather than a bureau-hit / customer-master lookup.
+- **`types.ts` mirrors `schemas.py` manually** — no OpenAPI codegen; when backend schemas change, update the frontend types in the same commit.
 
 ## What NOT to Do
 

@@ -111,11 +111,15 @@ def decide(composite: int, band: str, features: Features) -> Decision:
     )
 
 
+# Factors are ranked by contribution × dimension weight, so a +20 factor in a
+# 0.12-weight dimension doesn't outrank a +15 factor in a 0.22-weight one.
+
+
 def pick_top_strengths(dimensions: list[DimensionScore], n: int = 3) -> list[str]:
     factors = [
         (f, d) for d in dimensions for f in d.factors if f.kind.value == "STRENGTH"
     ]
-    factors.sort(key=lambda x: x[0].contribution, reverse=True)
+    factors.sort(key=lambda x: x[0].contribution * x[1].weight, reverse=True)
     return [f"{f.name} — {f.detail}" for f, _ in factors[:n]]
 
 
@@ -123,5 +127,5 @@ def pick_top_risks(dimensions: list[DimensionScore], n: int = 3) -> list[str]:
     factors = [
         (f, d) for d in dimensions for f in d.factors if f.kind.value == "RISK"
     ]
-    factors.sort(key=lambda x: x[0].contribution)  # most negative first
+    factors.sort(key=lambda x: x[0].contribution * x[1].weight)  # most negative first
     return [f"{f.name} — {f.detail}" for f, _ in factors[:n]]
