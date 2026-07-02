@@ -35,7 +35,7 @@ function TopBar() {
               MSME Financial Health Card
             </div>
             <div className="text-[11px] text-ink-500 -mt-0.5">
-              ULI · OCEN · AA · GST · UPI · EPFO
+              AA consent-first · ULI/OCEN-ready · GST · UPI · EPFO
             </div>
           </div>
         </Link>

@@ -231,7 +231,9 @@ def score_cash_flow(f: Features) -> DimensionScore:
             contribution=-10, kind=FactorKind.RISK,
         ))
 
-    trend = "IMPROVING" if r >= 1.10 else "STABLE" if r >= 1.0 else "DECLINING"
+    # Trend from the balance trajectory over the 12-month window, not the
+    # current ratio level.
+    trend = _trend(f.balance_trend_pct, up_th=0.10, down_th=-0.10)
     summary = (
         f"{fmt_paise_short(f.monthly_surplus_paise)}/mo net surplus, "
         f"{f.bounce_count} bounces."
@@ -390,7 +392,8 @@ def score_compliance(f: Features) -> DimensionScore:
             contribution=0, kind=FactorKind.NEUTRAL,
         ))
 
-    trend = "STABLE"
+    # Trend = on-time filing rate, recent 6 months vs the 6 before.
+    trend = _trend(f.gst_on_time_trend_pct, up_th=0.05, down_th=-0.05)
     summary = f"GST {pct:.0%} on time" + (
         f", EPFO {(f.epfo_filing_on_time_pct or 0):.0%} on time" if f.epfo_active else ""
     )
@@ -562,7 +565,16 @@ def score_obligation_leverage(f: Features) -> DimensionScore:
             contribution=-35, kind=FactorKind.RISK,
         ))
 
-    trend = "STABLE"
+    # Trend from the EMI trajectory — inverted, since rising debt service is
+    # a deterioration. None (steady book, <12m history) reads as STABLE.
+    if f.emi_trend_pct is None:
+        trend = "STABLE"
+    elif f.emi_trend_pct > 0.10:
+        trend = "DECLINING"
+    elif f.emi_trend_pct < -0.10:
+        trend = "IMPROVING"
+    else:
+        trend = "STABLE"
     summary = f"EMI {fmt_paise_short(f.monthly_emi_paise)}/mo, DSCR {dscr:.1f}×."
     return _mk("obligation_leverage", "Obligation & Leverage", factors, trend, summary)
 

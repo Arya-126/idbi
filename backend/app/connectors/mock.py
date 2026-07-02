@@ -10,8 +10,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .. import personas
-from ..schemas import AaProfile, EpfoProfile, GstProfile, UpiProfile
-from .base import ConnectorError
+from ..consent import ConsentError, require_active
+from ..schemas import (
+    AaProfile,
+    EnterpriseIdentity,
+    EpfoProfile,
+    GstProfile,
+    UpiProfile,
+)
+from .base import ConnectorError, ConnectorSet
 
 
 def _pack_or_raise(gstin: str):
@@ -19,6 +26,15 @@ def _pack_or_raise(gstin: str):
     if pack is None:
         raise ConnectorError(f"No persona registered for GSTIN {gstin}")
     return pack
+
+
+@dataclass
+class MockIdentityConnector:
+    def fetch(self, gstin: str) -> EnterpriseIdentity:
+        persona = personas.get_persona(gstin)
+        if persona is None:
+            raise ConnectorError(f"No persona registered for GSTIN {gstin}")
+        return personas.identity_for(persona)
 
 
 @dataclass
@@ -30,9 +46,12 @@ class MockGstConnector:
 @dataclass
 class MockAaConnector:
     def fetch(self, consent_handle: str, gstin: str) -> AaProfile:
-        pack = _pack_or_raise(gstin)
-        # Real AA calls would validate the consent handle here. Mock allows any.
-        return pack.aa
+        # Like a real FIU→AA call, the handle must be a live registered grant.
+        try:
+            require_active(consent_handle, gstin)
+        except ConsentError as e:
+            raise ConnectorError(f"AA consent rejected: {e}") from e
+        return _pack_or_raise(gstin).aa
 
 
 @dataclass
@@ -47,16 +66,9 @@ class MockUpiConnector:
         return _pack_or_raise(gstin).upi
 
 
-@dataclass
-class ConnectorSet:
-    gst: MockGstConnector
-    aa: MockAaConnector
-    epfo: MockEpfoConnector
-    upi: MockUpiConnector
-
-
 def build_default_connectors() -> ConnectorSet:
     return ConnectorSet(
+        identity=MockIdentityConnector(),
         gst=MockGstConnector(),
         aa=MockAaConnector(),
         epfo=MockEpfoConnector(),

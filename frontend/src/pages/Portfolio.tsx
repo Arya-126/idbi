@@ -9,6 +9,7 @@ export default function PortfolioPage() {
   const [data, setData] = useState<PortfolioSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "watch" | "ntc" | "demo">("all");
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     api
@@ -16,6 +17,17 @@ export default function PortfolioPage() {
       .then(setData)
       .catch((e) => setError(String(e)));
   }, []);
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      setData(await api.refreshPortfolio());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   if (error) {
     return (
@@ -32,9 +44,10 @@ export default function PortfolioPage() {
   const filtered = data.entries.filter((e) => {
     if (filter === "watch") return e.is_watchlist;
     if (filter === "demo") return e.is_demo;
-    if (filter === "ntc") return e.probability_of_default > 0 && !e.is_demo;
+    if (filter === "ntc") return e.is_ntc || e.is_ntb;
     return true;
   });
+  const ntcNtbTotal = data.entries.filter((e) => e.is_ntc || e.is_ntb).length;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8 space-y-6">
@@ -52,8 +65,20 @@ export default function PortfolioPage() {
             history · {data.watchlist_count} on watch-list.
           </p>
         </div>
-        <div className="text-[11px] text-ink-500 font-mono">
-          refreshed {new Date(data.generated_at).toLocaleString("en-IN")}
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-ink-500 font-mono">
+            refreshed {new Date(data.generated_at).toLocaleString("en-IN")}
+          </span>
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            className={clsx(
+              "btn-ghost !py-1 !px-2.5 text-xs border border-ink-200 rounded-lg",
+              refreshing && "opacity-60 cursor-not-allowed",
+            )}
+          >
+            {refreshing ? "Re-scoring…" : "↻ Re-score book"}
+          </button>
         </div>
       </header>
 
@@ -117,7 +142,7 @@ export default function PortfolioPage() {
               [
                 ["all", "All"],
                 ["watch", `Watch-list (${data.watchlist_count})`],
-                ["ntc", "Sampled book"],
+                ["ntc", `NTC/NTB (${ntcNtbTotal})`],
                 ["demo", "Demo personas"],
               ] as const
             ).map(([k, label]) => (
@@ -168,6 +193,16 @@ export default function PortfolioPage() {
                         {e.is_demo && (
                           <span className="ml-2 pill bg-brand-50 text-brand-700 border border-brand-200 text-[9px]">
                             demo
+                          </span>
+                        )}
+                        {e.is_ntc && (
+                          <span className="ml-1.5 pill bg-violet-50 text-violet-700 border border-violet-200 text-[9px]">
+                            NTC
+                          </span>
+                        )}
+                        {e.is_ntb && (
+                          <span className="ml-1.5 pill bg-sky-50 text-sky-700 border border-sky-200 text-[9px]">
+                            NTB
                           </span>
                         )}
                       </div>

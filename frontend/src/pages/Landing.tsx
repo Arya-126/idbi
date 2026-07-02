@@ -75,7 +75,7 @@ function Hero() {
             "6 scored dimensions",
             "Factor-level explainability",
             "Near real-time",
-            "ULI / OCEN / AA-native",
+            "AA consent-first · ULI/OCEN-ready",
             "NTC / NTB inclusion",
           ].map((t) => (
             <span key={t} className="pill bg-white border border-ink-200 text-ink-600">

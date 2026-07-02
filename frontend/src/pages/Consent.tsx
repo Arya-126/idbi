@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import clsx from "clsx";
-import { api } from "../api";
-import type { ConsentSource } from "../types";
+import { api, storeConsent } from "../api";
+import type { ConsentSource, DataPackLite } from "../types";
 
 const SOURCES: {
   key: ConsentSource;
@@ -51,9 +51,9 @@ export default function ConsentPage() {
   const [chosen, setChosen] = useState<Set<ConsentSource>>(
     new Set(SOURCES.map((s) => s.key)),
   );
-  const [fetchedSources, setFetchedSources] = useState<Set<ConsentSource>>(
-    new Set(),
-  );
+  const [fetched, setFetched] = useState<
+    Partial<Record<ConsentSource, string>>
+  >({});
   const [error, setError] = useState<string | null>(null);
 
   function toggle(key: ConsentSource) {
@@ -67,15 +67,20 @@ export default function ConsentPage() {
     if (!gstin) return;
     setStage("REQUESTING");
     try {
-      await api.requestConsent(gstin, Array.from(chosen));
+      const consent = await api.requestConsent(gstin, Array.from(chosen));
+      storeConsent(gstin, consent.consent_id);
       setStage("GRANTED");
-      await sleep(600);
+      await sleep(500);
       setStage("FETCHING");
-      // Simulated per-source pull for demo texture
+      // Real pull: the consent handle is validated server-side and the
+      // normalized data pack comes back with actual record counts.
+      const pack = await api.dataPack(gstin, consent.consent_id);
+      const counts = sourceCounts(pack);
+      // Reveal sources one by one for demo texture — the data is already in.
       for (const s of SOURCES) {
         if (chosen.has(s.key)) {
-          await sleep(500 + Math.random() * 400);
-          setFetchedSources((cur) => new Set(cur).add(s.key));
+          await sleep(350);
+          setFetched((cur) => ({ ...cur, [s.key]: counts[s.key] }));
         }
       }
       setStage("READY");
@@ -109,7 +114,7 @@ export default function ConsentPage() {
             key={s.key}
             source={s}
             checked={chosen.has(s.key)}
-            fetched={fetchedSources.has(s.key)}
+            fetchedLabel={fetched[s.key]}
             stage={stage}
             onToggle={() => toggle(s.key)}
           />
@@ -150,16 +155,17 @@ export default function ConsentPage() {
 function SourceRow({
   source,
   checked,
-  fetched,
+  fetchedLabel,
   stage,
   onToggle,
 }: {
   source: (typeof SOURCES)[number];
   checked: boolean;
-  fetched: boolean;
+  fetchedLabel: string | undefined;
   stage: Stage;
   onToggle: () => void;
 }) {
+  const fetched = fetchedLabel !== undefined;
   const active = stage === "FETCHING" && checked && !fetched;
   return (
     <button
@@ -195,7 +201,7 @@ function SourceRow({
           </span>
         ) : fetched ? (
           <span className="pill bg-emerald-100 text-emerald-700 border border-emerald-200">
-            ✓ Fetched
+            ✓ {fetchedLabel}
           </span>
         ) : active ? (
           <span className="pill bg-brand-100 text-brand-700 border border-brand-200">
@@ -214,4 +220,15 @@ function SourceRow({
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function sourceCounts(pack: DataPackLite): Record<ConsentSource, string> {
+  return {
+    GST: `${pack.gst.returns.length} returns`,
+    AA: `${pack.aa.linked_accounts[0]?.transactions.length ?? 0} bank txns`,
+    EPFO: pack.epfo.active
+      ? `${pack.epfo.monthly.length} months`
+      : "not covered",
+    UPI: `${pack.upi.monthly.length} months`,
+  };
 }

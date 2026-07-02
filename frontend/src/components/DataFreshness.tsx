@@ -22,7 +22,7 @@ export default function DataFreshness({ card }: { card: HealthCard }) {
               {src}
             </div>
             <div className="mt-0.5 text-ink-900 font-mono text-[11px]">
-              latest {iso.slice(0, 7)}
+              {iso ? `latest ${iso.slice(0, 7)}` : "n/a"}
             </div>
           </div>
         ))}

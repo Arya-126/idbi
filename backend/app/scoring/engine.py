@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..connectors import build_default_connectors
-from ..connectors.mock import ConnectorSet
+from ..connectors import ConnectorError, ConnectorSet, build_default_connectors
+from ..consent import resolve as resolve_consent
 from ..schemas import (
     DataPack,
     HealthCard,
@@ -46,23 +46,26 @@ def _default_connectors() -> ConnectorSet:
     return _DEFAULT
 
 
-def build_data_pack(gstin: str, consent_handle: str = "MOCK-CONSENT") -> DataPack:
+def build_data_pack(gstin: str, consent_handle: str | None = None) -> DataPack:
     """Pull every source through its connector and assemble a DataPack.
 
-    In production this is where consent handles get validated, per-source
-    fetches get parallelized, and retries/circuit-breakers live.
+    A supplied consent handle is validated (unknown/revoked/expired → error);
+    without one, the registry reuses or auto-issues a demo grant (see
+    `app.consent`). In production this is also where per-source fetches get
+    parallelized and retries/circuit-breakers live.
     """
-    from ..personas import build_data_pack as persona_pack  # deferred: mock owns identity
-
-    identity_pack = persona_pack(gstin)
-    if identity_pack is None:
-        raise KeyError(f"Unknown GSTIN: {gstin}")
-
     conn = _default_connectors()
+    try:
+        identity = conn.identity.fetch(gstin)
+    except ConnectorError as e:
+        raise KeyError(f"Unknown GSTIN: {gstin}") from e
+
+    grant = resolve_consent(gstin, consent_handle)
+
     return DataPack(
-        identity=identity_pack.identity,
+        identity=identity,
         gst=conn.gst.fetch(gstin),
-        aa=conn.aa.fetch(consent_handle, gstin),
+        aa=conn.aa.fetch(grant.consent_id, gstin),
         epfo=conn.epfo.fetch(gstin),
         upi=conn.upi.fetch(gstin),
         fetched_at=datetime.utcnow(),
@@ -80,7 +83,9 @@ def score_data_pack(pack: DataPack) -> HealthCard:
     strengths = pick_top_strengths(dimensions)
     risks = pick_top_risks(dimensions)
 
-    ml = get_model().predict(features)
+    model = get_model()
+    ml = model.predict(features)
+    agrees, summary = _ml_alignment(ml.probability_of_default, decision.recommendation)
     ml_assessment = MlAssessment(
         probability_of_default=ml.probability_of_default,
         confidence=ml.confidence,
@@ -103,25 +108,24 @@ def score_data_pack(pack: DataPack) -> HealthCard:
             for d in ml.supports
         ],
         model_version=ml.model_version,
-        trained_on_n_samples=500,
-        summary=_ml_summary(ml.probability_of_default, decision.recommendation),
+        trained_on_n_samples=model.trained_on_n,
+        holdout_auc=model.holdout_auc,
+        agrees_with_rulebook=agrees,
+        summary=summary,
     )
 
-    freshness = {
-        "GST": pack.gst.returns[-1].period + "-01" if pack.gst.returns else "n/a",
-        "AA": pack.aa.linked_accounts[0].as_of.isoformat()
-        if pack.aa.linked_accounts else "n/a",
-        "EPFO": pack.epfo.monthly[-1].period + "-01" if pack.epfo.monthly else "n/a",
-        "UPI": pack.upi.monthly[-1].period + "-01" if pack.upi.monthly else "n/a",
-    }
     from datetime import date as _date
 
-    def _to_date(s: str) -> _date:
-        if s == "n/a":
-            return _date.today()
-        return _date.fromisoformat(s)
+    def _period_date(period: str | None) -> _date | None:
+        return _date.fromisoformat(period + "-01") if period else None
 
-    freshness_dates = {k: _to_date(v) for k, v in freshness.items()}
+    # None = source absent — the UI renders "n/a" rather than a fake date.
+    freshness_dates: dict[str, _date | None] = {
+        "GST": _period_date(pack.gst.returns[-1].period if pack.gst.returns else None),
+        "AA": pack.aa.linked_accounts[0].as_of if pack.aa.linked_accounts else None,
+        "EPFO": _period_date(pack.epfo.monthly[-1].period if pack.epfo.monthly else None),
+        "UPI": _period_date(pack.upi.monthly[-1].period if pack.upi.monthly else None),
+    }
 
     return HealthCard(
         enterprise=pack.identity,
@@ -137,8 +141,12 @@ def score_data_pack(pack: DataPack) -> HealthCard:
     )
 
 
-def _ml_summary(pd: float, recommendation: str) -> str:
-    """One-liner comparing ML to rulebook so the officer sees agreement/discord."""
+def _ml_alignment(pd: float, recommendation: str) -> tuple[bool, str]:
+    """Agreement flag + one-liner comparing ML to rulebook.
+
+    The boolean travels on the API contract (`agrees_with_rulebook`) so the
+    UI never has to infer agreement from the summary wording.
+    """
     if pd < 0.05:
         risk_label = "very low"
     elif pd < 0.12:
@@ -156,9 +164,9 @@ def _ml_summary(pd: float, recommendation: str) -> str:
         or (recommendation == "DECLINE" and pd > 0.25)
     )
     prefix = "Model agrees" if aligned else "Model disagrees"
-    return f"{prefix} — predicts {risk_label} default risk ({pd * 100:.1f}%)."
+    return aligned, f"{prefix} — predicts {risk_label} default risk ({pd * 100:.1f}%)."
 
 
-def score_gstin(gstin: str, consent_handle: str = "MOCK-CONSENT") -> HealthCard:
+def score_gstin(gstin: str, consent_handle: str | None = None) -> HealthCard:
     pack = build_data_pack(gstin, consent_handle)
     return score_data_pack(pack)

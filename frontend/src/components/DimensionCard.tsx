@@ -8,7 +8,7 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ink-900">{dim.label}</div>
-          <div className="text-xs text-ink-500 mt-0.5 truncate">
+          <div className="text-xs text-ink-500 mt-0.5 leading-snug">
             {dim.summary}
           </div>
         </div>

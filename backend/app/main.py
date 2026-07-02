@@ -3,27 +3,32 @@
 Routes:
   GET  /health                     — liveness
   GET  /api/msme                   — list demo enterprises
-  POST /api/consent                — start (mocked) consent flow
+  POST /api/consent                — issue a consent grant (registered + enforced)
+  POST /api/consent/{id}/revoke    — revoke a grant
   GET  /api/msme/{gstin}/data-pack — normalized data pulled from all sources
   GET  /api/msme/{gstin}/health-card — full scored Financial Health Card
+  GET  /api/portfolio              — cached 30-MSME book
+  POST /api/portfolio/refresh      — invalidate + rebuild the book
+
+Data endpoints accept `?consent=<handle>`; a supplied handle must be valid
+(unknown/revoked/expired → 403). Without one, the registry auto-issues a demo
+grant — see `app.consent` for why that fallback exists.
 
 CORS is wide-open in dev because the Vite frontend runs on a different port.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from uuid import uuid4
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import consent as consent_store
 from . import personas
-from .portfolio import build_portfolio
+from .consent import ConsentError
+from .portfolio import build_portfolio, invalidate
 from .schemas import (
     ConsentGrant,
     ConsentRequest,
-    ConsentSource,
     DataPack,
     HealthCard,
     MsmeSummary,
@@ -36,7 +41,8 @@ app = FastAPI(
     version="0.1.0",
     description=(
         "AI/ML-driven credit assessment for NTC/NTB MSMEs, aggregating GST, "
-        "Account Aggregator, EPFO and UPI signals via ULI/OCEN/AA rails."
+        "Account Aggregator, EPFO and UPI signals over a consent-first, "
+        "ULI/OCEN-ready connector layer."
     ),
 )
 
@@ -74,41 +80,59 @@ def get_portfolio() -> PortfolioSummary:
     return build_portfolio()
 
 
+@app.post("/api/portfolio/refresh", response_model=PortfolioSummary)
+def refresh_portfolio() -> PortfolioSummary:
+    """Drop the cached book and re-score all 30 MSMEs."""
+    invalidate()
+    return build_portfolio()
+
+
 @app.post("/api/consent", response_model=ConsentGrant)
 def request_consent(req: ConsentRequest) -> ConsentGrant:
-    """Mock consent flow.
+    """Issue a consent grant and register it for downstream validation.
 
-    Real AA / GSTN consent artefacts have TTLs, revocation semantics, and
-    per-source scope. For the demo we return an immediately-granted handle so
-    the UI can proceed to data pull. Production would return PENDING first,
-    poll for the borrower's approval, and then GRANTED.
+    Real AA / GSTN consent goes PENDING → borrower approves → GRANTED; the
+    demo grants immediately but keeps the artefact real: the handle is stored,
+    checked (GSTIN match, status, expiry) on every data pull, and revocable.
     """
     if personas.get_persona(req.gstin) is None:
         raise HTTPException(status_code=404, detail="MSME not found")
+    return consent_store.issue(req.gstin, req.sources)
 
-    granted = datetime.utcnow()
-    expires = granted + timedelta(days=30)
-    return ConsentGrant(
-        consent_id=f"CH-{uuid4().hex[:12].upper()}",
-        gstin=req.gstin,
-        sources=req.sources or list(ConsentSource),
-        granted_at=granted,
-        expires_at=expires,
-        status="GRANTED",
+
+@app.post("/api/consent/{consent_id}/revoke", response_model=ConsentGrant)
+def revoke_consent(consent_id: str) -> ConsentGrant:
+    grant = consent_store.revoke(consent_id)
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Unknown consent handle")
+    return grant
+
+
+def _not_found(gstin: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail=(
+            f"Unknown GSTIN {gstin} — this demo scores only its registered "
+            "synthetic MSMEs (5 demo personas + the sampled portfolio book)."
+        ),
     )
 
 
 @app.get("/api/msme/{gstin}/data-pack", response_model=DataPack)
-def get_data_pack(gstin: str) -> DataPack:
+def get_data_pack(gstin: str, consent: str | None = None) -> DataPack:
     try:
-        return build_data_pack(gstin)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        return build_data_pack(gstin, consent)
+    except KeyError:
+        raise _not_found(gstin)
+    except ConsentError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
 
 
 @app.get("/api/msme/{gstin}/health-card", response_model=HealthCard)
-def get_health_card(gstin: str) -> HealthCard:
+def get_health_card(gstin: str, consent: str | None = None) -> HealthCard:
     try:
-        return score_gstin(gstin)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        return score_gstin(gstin, consent)
+    except KeyError:
+        raise _not_found(gstin)
+    except ConsentError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e

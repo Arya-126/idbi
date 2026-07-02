@@ -32,6 +32,9 @@ class Features:
     gst_filing_on_time_pct: float
     gst_avg_delay_days: float
     epfo_filing_on_time_pct: float | None
+    # On-time rate, recent 6 months minus prior 6 months (percentage points
+    # as a fraction, e.g. +0.17). None if <12 months of filings.
+    gst_on_time_trend_pct: float | None
 
     # Cash-flow (from AA)
     monthly_inflow_paise: int
@@ -41,6 +44,12 @@ class Features:
     min_balance_paise: int
     bounce_count: int
     monthly_emi_paise: int
+    # Avg monthly balance, recent 3m vs first 3m. None if <6 months of txns
+    # or the early balance is non-positive (pct change undefined).
+    balance_trend_pct: float | None
+    # Avg monthly EMI debit, recent 6m vs prior 6m. None if unlevered or
+    # no EMI observed in the earlier window.
+    emi_trend_pct: float | None
 
     # DSCR proxy: (monthly cash surplus + EMI) / EMI
     dscr_proxy: float | None  # None if no EMI (unlevered)
@@ -102,6 +111,12 @@ def extract_features(pack: DataPack) -> Features:
         [r.filing_delay_days for r in returns if not r.filed_on_time]
     ) if any(not r.filed_on_time for r in returns) else 0.0
 
+    gst_on_time_trend: float | None = None
+    if n_gst >= 12:
+        recent_rate = sum(1 for r in returns[-6:] if r.filed_on_time) / 6
+        prior_rate = sum(1 for r in returns[-12:-6] if r.filed_on_time) / 6
+        gst_on_time_trend = recent_rate - prior_rate
+
     # ─── EPFO ────────────────────────────────────────────────────────────
     epfo_active = pack.epfo.active
     epfo_on_time_pct: float | None = None
@@ -126,6 +141,9 @@ def extract_features(pack: DataPack) -> Features:
     bounce_count = 0
     monthly_emi = 0
 
+    balance_trend: float | None = None
+    emi_trend: float | None = None
+
     if account:
         txns = account.transactions
         credits = [t.amount_paise for t in txns if t.amount_paise > 0]
@@ -141,6 +159,30 @@ def extract_features(pack: DataPack) -> Features:
         bounce_count = account.bounce_incidents
         emi_debits = [-t.amount_paise for t in txns if t.category.value == "EMI"]
         monthly_emi = sum(emi_debits) // n_months if emi_debits else 0
+
+        # Balance trajectory: avg balance per calendar month, recent 3 vs first 3.
+        by_month: dict[tuple[int, int], list[int]] = {}
+        for t in txns:
+            by_month.setdefault((t.date.year, t.date.month), []).append(t.balance_paise)
+        months_sorted = sorted(by_month)
+        if len(months_sorted) >= 6:
+            monthly_avgs = [statistics.fmean(by_month[m]) for m in months_sorted]
+            early = statistics.fmean(monthly_avgs[:3])
+            late = statistics.fmean(monthly_avgs[-3:])
+            if early > 0:
+                balance_trend = _pct(late, early)
+
+        # EMI trajectory: avg monthly EMI debit, recent 6 months vs prior 6.
+        if emi_debits and len(months_sorted) >= 12:
+            emi_by_month = {m: 0 for m in months_sorted}
+            for t in txns:
+                if t.category.value == "EMI":
+                    emi_by_month[(t.date.year, t.date.month)] += -t.amount_paise
+            emi_series = [emi_by_month[m] for m in months_sorted]
+            prior = statistics.fmean(emi_series[-12:-6])
+            recent = statistics.fmean(emi_series[-6:])
+            if prior > 0:
+                emi_trend = _pct(recent, prior)
 
     ratio = (inflow / outflow) if outflow else 0.0
     surplus = inflow - outflow  # per month
@@ -175,6 +217,7 @@ def extract_features(pack: DataPack) -> Features:
         gst_filing_on_time_pct=gst_on_time_pct,
         gst_avg_delay_days=gst_avg_delay,
         epfo_filing_on_time_pct=epfo_on_time_pct,
+        gst_on_time_trend_pct=gst_on_time_trend,
         monthly_inflow_paise=inflow,
         monthly_outflow_paise=outflow,
         inflow_outflow_ratio=ratio,
@@ -182,6 +225,8 @@ def extract_features(pack: DataPack) -> Features:
         min_balance_paise=min_balance,
         bounce_count=bounce_count,
         monthly_emi_paise=monthly_emi,
+        balance_trend_pct=balance_trend,
+        emi_trend_pct=emi_trend,
         dscr_proxy=dscr,
         monthly_surplus_paise=surplus,
         upi_monthly_inflow_paise=upi_inflow,

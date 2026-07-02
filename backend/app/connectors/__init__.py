@@ -10,12 +10,15 @@ The Protocol contract keeps mocks and future real adapters interchangeable.
 
 from .base import (
     ConnectorError,
+    ConnectorSet,
+    IdentityConnector,
     GstConnector,
     AaConnector,
     EpfoConnector,
     UpiConnector,
 )
 from .mock import (
+    MockIdentityConnector,
     MockGstConnector,
     MockAaConnector,
     MockEpfoConnector,
@@ -25,10 +28,13 @@ from .mock import (
 
 __all__ = [
     "ConnectorError",
+    "ConnectorSet",
+    "IdentityConnector",
     "GstConnector",
     "AaConnector",
     "EpfoConnector",
     "UpiConnector",
+    "MockIdentityConnector",
     "MockGstConnector",
     "MockAaConnector",
     "MockEpfoConnector",

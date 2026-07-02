@@ -29,6 +29,7 @@ from typing import Callable
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
 
 from .ml_data import SampledMsme, sample_population
 from .personas import L_PAISE, Persona
@@ -101,6 +102,12 @@ def _features_from_persona(p: Persona) -> Features:
     12 months of txns per sample. We instead compute the expected values of
     the features analytically from the same knobs the txn generator uses,
     which keeps training features distributionally close to production ones.
+
+    Known train/serve skew: these are expectations, not realizations — e.g.
+    turnover_cov is approximated as seasonality + noise floor, and GST history
+    is fixed at 24 months. Scoring-time features come from the full generated
+    series, so individual explanations can occasionally rank a feature oddly
+    (a production concern to solve by training on the full pipeline).
     """
     turnover_paise = int(p.monthly_turnover_lakhs * L_PAISE)
     inflow = turnover_paise
@@ -124,6 +131,7 @@ def _features_from_persona(p: Persona) -> Features:
         gst_filing_on_time_pct=p.filing_discipline,
         gst_avg_delay_days=(1 - p.filing_discipline) * 30,
         epfo_filing_on_time_pct=epfo_pct,
+        gst_on_time_trend_pct=0.0,
         monthly_inflow_paise=inflow,
         monthly_outflow_paise=outflow,
         inflow_outflow_ratio=p.inflow_outflow_ratio,
@@ -131,6 +139,8 @@ def _features_from_persona(p: Persona) -> Features:
         min_balance_paise=int(balance * (1 - p.balance_volatility)),
         bounce_count=p.bounce_incidents_12m,
         monthly_emi_paise=emi,
+        balance_trend_pct=p.growth_yoy * 0.5,
+        emi_trend_pct=0.0 if emi > 0 else None,
         dscr_proxy=dscr,
         monthly_surplus_paise=surplus,
         upi_monthly_inflow_paise=upi_inflow,
@@ -173,23 +183,43 @@ class PdModel:
         self._version: str = ""
         self._train_pd_std: float = 0.0
         self._train_pd_mean: float = 0.0
+        self._trained_on_n: int = 0
+        self._holdout_auc: float | None = None
 
-    def train(self, n_samples: int = 500, seed: int = 42) -> None:
-        pop: list[SampledMsme] = sample_population(n_samples, seed)
-        X = np.stack([feature_vector(_features_from_persona(s.persona)) for s in pop])
-        y = np.array([1 if s.defaulted else 0 for s in pop], dtype=np.int32)
-
+    @staticmethod
+    def _make_clf(seed: int) -> HistGradientBoostingClassifier:
         # HistGradientBoosting is fast, handles NaNs, and gives good calibration
         # with a small population. We keep depth shallow so the model doesn't
-        # memorize the 500 synthetic points.
-        self._clf = HistGradientBoostingClassifier(
+        # memorize the few hundred synthetic points.
+        return HistGradientBoostingClassifier(
             max_iter=180,
             max_depth=4,
             learning_rate=0.05,
             l2_regularization=0.1,
             random_state=seed,
         )
+
+    def train(self, n_samples: int = 500, seed: int = 42) -> None:
+        pop: list[SampledMsme] = sample_population(n_samples, seed)
+        X = np.stack([feature_vector(_features_from_persona(s.persona)) for s in pop])
+        y = np.array([1 if s.defaulted else 0 for s in pop], dtype=np.int32)
+
+        # Holdout evaluation: fit on 80%, score AUC on the held-out 20%,
+        # then refit on the full population for serving.
+        idx = np.random.default_rng(seed).permutation(n_samples)
+        cut = max(1, int(n_samples * 0.8))
+        tr, te = idx[:cut], idx[cut:]
+        self._holdout_auc = None
+        if len(te) > 0 and len(np.unique(y[te])) == 2:
+            eval_clf = self._make_clf(seed)
+            eval_clf.fit(X[tr], y[tr])
+            self._holdout_auc = float(
+                roc_auc_score(y[te], eval_clf.predict_proba(X[te])[:, 1])
+            )
+
+        self._clf = self._make_clf(seed)
         self._clf.fit(X, y)
+        self._trained_on_n = n_samples
 
         self._medians = np.median(X, axis=0)
 
@@ -247,14 +277,22 @@ class PdModel:
     def version(self) -> str:
         return self._version
 
+    @property
+    def trained_on_n(self) -> int:
+        return self._trained_on_n
+
+    @property
+    def holdout_auc(self) -> float | None:
+        return self._holdout_auc
+
 
 def _confidence(pd: float, mean: float, std: float) -> str:
     """Loose confidence heuristic: how "typical" is this PD?"""
     z = abs(pd - mean) / max(std, 0.01)
-    if z < 0.5:
-        return "medium"  # right in the middle where the model has seen a lot
     if pd < 0.05 or pd > 0.60:
         return "high"    # extreme predictions the model is confident about
+    if z > 2.0:
+        return "low"     # far outside the training PD distribution
     return "medium"
 
 
