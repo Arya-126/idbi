@@ -1,0 +1,102 @@
+# ─── Python (backend) ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ─── Node / Vite (frontend) ─────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Vite / build caches
+.vite/
+.turbo/
+.next/
+.cache/
+
+# NPM/Yarn/PNPM logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── Environments & secrets ─────────────────────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+
+# ─── Editors / IDEs ─────────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ─── OS junk ────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─── Claude Code ────────────────────────────────────────────────────────
+# Keep .claude/launch.json so contributors can `preview_start` out of the box.
+.claude/settings.local.json
+.claude/memory/
+.claude/tasks/
+.claude/skills/
+.claude/logs/
+
+# ─── Local scratch ──────────────────────────────────────────────────────
+scratchpad/
+tmp/
+*.log
