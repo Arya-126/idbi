@@ -8,6 +8,7 @@ import DimensionCard from "../components/DimensionCard";
 import DecisionPanel from "../components/DecisionPanel";
 import StrengthsRisks from "../components/StrengthsRisks";
 import DataFreshness from "../components/DataFreshness";
+import MlPanel from "../components/MlPanel";
 
 export default function HealthCardPage() {
   const { gstin } = useParams();
@@ -52,6 +53,8 @@ export default function HealthCardPage() {
         </section>
         <DecisionPanel decision={card.decision} band={card.risk_band} />
       </div>
+
+      <MlPanel ml={card.ml_assessment} />
 
       <StrengthsRisks
         strengths={card.top_strengths}

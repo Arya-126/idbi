@@ -66,9 +66,12 @@ Claude should know these terms; they appear throughout the project:
 - `backend/app/personas.py` — 5 synthetic MSME "personas" (Sharma Textiles, Kirana Bazaar, Kumar Enterprises, NewGen Tech, Meera Handicrafts) and the deterministic data generator that turns persona knobs into realistic GST/AA/EPFO/UPI payloads seeded by GSTIN.
 - `backend/app/connectors/` — thin adapters implementing `GstConnector` / `AaConnector` / `EpfoConnector` / `UpiConnector` protocols. Mock impls dispatch to `personas.build_data_pack`; real impls would call GSTN / AA / EPFO / NPCI.
 - `backend/app/scoring/` — feature engineering (`features.py`), the six dimension scorers with factor decomposition (`dimensions.py`), composite/decision logic (`decision.py`), and the orchestrator that assembles a `HealthCard` (`engine.py`). Weights live in `dimensions.WEIGHTS` — adjust in one place.
-- `backend/app/main.py` — FastAPI app: `/api/msme`, `/api/consent`, `/api/msme/{gstin}/data-pack`, `/api/msme/{gstin}/health-card`.
-- `frontend/src/pages/` — three-step user flow: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow) → `HealthCard` (full scored card).
-- `frontend/src/components/` — `HealthHeader`, `ScoreDial` (custom SVG dial), `DimensionRadar` (Recharts), `DimensionCard`, `DecisionPanel`, `StrengthsRisks`, `DataFreshness`.
+- `backend/app/main.py` — FastAPI app: `/api/msme`, `/api/consent`, `/api/msme/{gstin}/data-pack`, `/api/msme/{gstin}/health-card`, `/api/portfolio`. `startup` hook trains the ML model and pre-builds the portfolio cache so first requests are fast.
+- `backend/app/ml_data.py` — synthetic-population sampler + ground-truth default simulator. Same generator serves both ML training and the portfolio "book" view.
+- `backend/app/ml.py` — `PdModel` (scikit-learn `HistGradientBoostingClassifier`) with a canonical 18-feature vector, local counterfactual explainer (drivers / supports), and version hash. Training uses a fast persona-to-features shortcut; scoring uses production features from the connectors.
+- `backend/app/portfolio.py` — assembles the 30-MSME book (5 demos + 25 sampled), scores each, and caches summary metrics (band mix, sector mix, recommendation mix, exposure, watchlist, NTC/NTB count).
+- `frontend/src/pages/` — four routes: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow) → `HealthCard` (full scored card with ML panel) and `Portfolio` (credit-officer book view).
+- `frontend/src/components/` — `HealthHeader`, `ScoreDial` (custom SVG dial), `DimensionRadar` (Recharts), `DimensionCard`, `DecisionPanel`, `StrengthsRisks`, `MlPanel` (ML PD + drivers/supports), `DataFreshness`.
 - `frontend/src/api.ts` — thin fetch client; `types.ts` mirrors backend schemas (kept in sync manually).
 
 ## Scoring Model Design (initial direction)
@@ -83,6 +86,8 @@ Dimensions (each 0–100, weighted into composite):
 6. **Obligation & Leverage** — existing EMIs/obligations visible in bank statements; bureau data if available
 
 Composite → risk bands (e.g., A/B/C/D) → decision recommendation (approve / refer / decline) with suggested limit derived from cash-flow surplus.
+
+**In parallel, an ML "second opinion":** a `HistGradientBoostingClassifier` trained at startup on ~500 synthetic MSMEs (with ground-truth default outcomes from a hidden logistic simulator over the persona knobs) predicts a 12-month probability of default from the same 18 observable features. Local explanations come from counterfactual deltas — replace each feature with its population median and measure the PD change. Top-3 up = drivers; top-3 down = supports. The card surfaces whether the ML PD "agrees" or "disagrees" with the rulebook so an underwriter can flag divergent cases.
 
 ## Conventions
 
@@ -113,7 +118,8 @@ npm run build          # production build (also runs `tsc`)
 - `GET /api/msme` — list demo MSMEs
 - `POST /api/consent` — mock consent handle
 - `GET /api/msme/{gstin}/data-pack` — normalized GST + AA + EPFO + UPI
-- `GET /api/msme/{gstin}/health-card` — full scored card
+- `GET /api/msme/{gstin}/health-card` — full scored card + ML PD
+- `GET /api/portfolio` — 30-MSME book with band/sector/recommendation mix and watch-list
 - Interactive docs at `/docs`
 
 **Sanity checks:**

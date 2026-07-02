@@ -19,7 +19,12 @@ from datetime import datetime
 
 from ..connectors import build_default_connectors
 from ..connectors.mock import ConnectorSet
-from ..schemas import DataPack, HealthCard
+from ..schemas import (
+    DataPack,
+    HealthCard,
+    MlAssessment,
+    MlDriver as MlDriverSchema,
+)
 from .decision import (
     compute_composite,
     decide,
@@ -65,6 +70,8 @@ def build_data_pack(gstin: str, consent_handle: str = "MOCK-CONSENT") -> DataPac
 
 
 def score_data_pack(pack: DataPack) -> HealthCard:
+    from ..ml import get_model  # deferred: heavy import (numpy/sklearn)
+
     features = extract_features(pack)
     dimensions = score_all_dimensions(features)
     composite = compute_composite(dimensions)
@@ -72,6 +79,33 @@ def score_data_pack(pack: DataPack) -> HealthCard:
     decision = decide(composite, band, features)
     strengths = pick_top_strengths(dimensions)
     risks = pick_top_risks(dimensions)
+
+    ml = get_model().predict(features)
+    ml_assessment = MlAssessment(
+        probability_of_default=ml.probability_of_default,
+        confidence=ml.confidence,
+        drivers=[
+            MlDriverSchema(
+                feature_key=d.feature_key,
+                feature_label=d.feature_label,
+                contribution=d.contribution,
+                detail=d.detail,
+            )
+            for d in ml.drivers
+        ],
+        supports=[
+            MlDriverSchema(
+                feature_key=d.feature_key,
+                feature_label=d.feature_label,
+                contribution=d.contribution,
+                detail=d.detail,
+            )
+            for d in ml.supports
+        ],
+        model_version=ml.model_version,
+        trained_on_n_samples=500,
+        summary=_ml_summary(ml.probability_of_default, decision.recommendation),
+    )
 
     freshness = {
         "GST": pack.gst.returns[-1].period + "-01" if pack.gst.returns else "n/a",
@@ -97,9 +131,32 @@ def score_data_pack(pack: DataPack) -> HealthCard:
         top_strengths=strengths,
         top_risks=risks,
         decision=decision,
+        ml_assessment=ml_assessment,
         generated_at=datetime.utcnow(),
         data_freshness=freshness_dates,
     )
+
+
+def _ml_summary(pd: float, recommendation: str) -> str:
+    """One-liner comparing ML to rulebook so the officer sees agreement/discord."""
+    if pd < 0.05:
+        risk_label = "very low"
+    elif pd < 0.12:
+        risk_label = "low"
+    elif pd < 0.25:
+        risk_label = "moderate"
+    elif pd < 0.45:
+        risk_label = "elevated"
+    else:
+        risk_label = "high"
+
+    aligned = (
+        (recommendation == "APPROVE" and pd < 0.20)
+        or (recommendation == "REFER" and 0.10 <= pd <= 0.45)
+        or (recommendation == "DECLINE" and pd > 0.25)
+    )
+    prefix = "Model agrees" if aligned else "Model disagrees"
+    return f"{prefix} — predicts {risk_label} default risk ({pd * 100:.1f}%)."
 
 
 def score_gstin(gstin: str, consent_handle: str = "MOCK-CONSENT") -> HealthCard:

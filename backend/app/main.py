@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import personas
+from .portfolio import build_portfolio
 from .schemas import (
     ConsentGrant,
     ConsentRequest,
@@ -26,8 +27,9 @@ from .schemas import (
     DataPack,
     HealthCard,
     MsmeSummary,
+    PortfolioSummary,
 )
-from .scoring.engine import build_data_pack, score_data_pack, score_gstin
+from .scoring.engine import build_data_pack, score_gstin  # noqa: F401
 
 app = FastAPI(
     title="MSME Financial Health Card",
@@ -47,6 +49,14 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def _warm_caches() -> None:
+    """Train the PD model and build the portfolio at boot so first requests are fast."""
+    from .ml import get_model
+    get_model()          # trains ~500 samples in <1s
+    build_portfolio()    # scores 30 MSMEs and caches summary
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -54,7 +64,14 @@ def health() -> dict[str, str]:
 
 @app.get("/api/msme", response_model=list[MsmeSummary])
 def list_msmes() -> list[MsmeSummary]:
+    # Only the 5 hand-authored demo personas show on the landing tiles;
+    # the 25 sampled book members live in the portfolio view.
     return personas.list_summaries()
+
+
+@app.get("/api/portfolio", response_model=PortfolioSummary)
+def get_portfolio() -> PortfolioSummary:
+    return build_portfolio()
 
 
 @app.post("/api/consent", response_model=ConsentGrant)

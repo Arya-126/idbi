@@ -1,4 +1,10 @@
-import type { ConsentGrant, ConsentSource, HealthCard, MsmeSummary } from "./types";
+import type {
+  ConsentGrant,
+  ConsentSource,
+  HealthCard,
+  MsmeSummary,
+  PortfolioSummary,
+} from "./types";
 
 const BASE = "/api";
 
@@ -17,6 +23,7 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   listMsmes: () => req<MsmeSummary[]>("/msme"),
   healthCard: (gstin: string) => req<HealthCard>(`/msme/${gstin}/health-card`),
+  portfolio: () => req<PortfolioSummary>("/portfolio"),
   requestConsent: (gstin: string, sources: ConsentSource[]) =>
     req<ConsentGrant>("/consent", {
       method: "POST",

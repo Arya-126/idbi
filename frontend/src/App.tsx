@@ -1,7 +1,9 @@
-import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import clsx from "clsx";
 import LandingPage from "./pages/Landing";
 import ConsentPage from "./pages/Consent";
 import HealthCardPage from "./pages/HealthCard";
+import PortfolioPage from "./pages/Portfolio";
 
 export default function App() {
   return (
@@ -10,6 +12,7 @@ export default function App() {
       <main className="flex-1">
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/consent/:gstin" element={<ConsentPage />} />
           <Route path="/msme/:gstin" element={<HealthCardPage />} />
         </Routes>
@@ -21,11 +24,11 @@ export default function App() {
 
 function TopBar() {
   const loc = useLocation();
-  const isHome = loc.pathname === "/";
+  const showBack = loc.pathname.startsWith("/consent") || loc.pathname.startsWith("/msme/");
   return (
     <header className="border-b border-ink-100 bg-white/70 backdrop-blur">
-      <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3 group">
+      <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between gap-4">
+        <Link to="/" className="flex items-center gap-3 group shrink-0">
           <Logo />
           <div>
             <div className="text-sm font-semibold tracking-tight text-ink-900 group-hover:text-brand-600 transition">
@@ -36,16 +39,39 @@ function TopBar() {
             </div>
           </div>
         </Link>
+        <nav className="flex items-center gap-1 rounded-xl bg-ink-50/70 p-1 text-xs">
+          <TabLink to="/" label="Onboarding" end />
+          <TabLink to="/portfolio" label="Portfolio" />
+        </nav>
         <div className="flex items-center gap-3 text-xs text-ink-500">
-          {!isHome && (
-            <Link to="/" className="btn-ghost !py-1 !px-2 text-xs">
-              ← Back to portfolio
+          {showBack && (
+            <Link to="/portfolio" className="btn-ghost !py-1 !px-2 text-xs">
+              ← Portfolio
             </Link>
           )}
-          <span className="hidden md:inline">Demo build · Track 03</span>
+          <span className="hidden md:inline">Demo · Track 03</span>
         </div>
       </div>
     </header>
+  );
+}
+
+function TabLink({ to, label, end }: { to: string; label: string; end?: boolean }) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        clsx(
+          "px-3 py-1.5 rounded-lg transition",
+          isActive
+            ? "bg-white shadow-sm text-ink-900 font-medium"
+            : "text-ink-500 hover:text-ink-800",
+        )
+      }
+    >
+      {label}
+    </NavLink>
   );
 }
 

@@ -14,7 +14,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ─── Enterprise identity ────────────────────────────────────────────────────
@@ -193,6 +193,27 @@ class Decision(BaseModel):
     rationale: str
 
 
+class MlDriver(BaseModel):
+    feature_key: str
+    feature_label: str
+    contribution: float  # signed PD delta vs population median
+    detail: str          # human-readable current value
+
+
+class MlAssessment(BaseModel):
+    # `model_version` collides with Pydantic's default `model_` protected
+    # namespace; disable it explicitly rather than rename the public field.
+    model_config = ConfigDict(protected_namespaces=())
+
+    probability_of_default: float = Field(ge=0.0, le=1.0)
+    confidence: Literal["high", "medium", "low"]
+    drivers: list[MlDriver]   # push PD up
+    supports: list[MlDriver]  # pull PD down
+    model_version: str
+    trained_on_n_samples: int
+    summary: str  # one-line agreement/disagreement with the rulebook decision
+
+
 class HealthCard(BaseModel):
     enterprise: EnterpriseIdentity
     composite_score: int = Field(ge=0, le=1000)
@@ -201,6 +222,7 @@ class HealthCard(BaseModel):
     top_strengths: list[str]
     top_risks: list[str]
     decision: Decision
+    ml_assessment: MlAssessment
     generated_at: datetime
     data_freshness: dict[str, date]
     disclaimer: str = (
@@ -244,3 +266,45 @@ class MsmeSummary(BaseModel):
     msme_category: MsmeCategory
     registered_city: str
     tagline: str  # short demo-facing label
+
+
+# ─── Portfolio dashboard ────────────────────────────────────────────────────
+
+
+class PortfolioEntry(BaseModel):
+    gstin: str
+    trade_name: str
+    sector: str
+    sub_sector: str
+    msme_category: MsmeCategory
+    registered_city: str
+    composite_score: int
+    risk_band: Literal["A", "B", "C", "D"]
+    recommendation: Literal["APPROVE", "REFER", "DECLINE"]
+    probability_of_default: float
+    monthly_turnover_paise: int
+    suggested_limit_paise: int
+    is_demo: bool  # true for the 5 hand-authored personas
+    is_watchlist: bool
+    watchlist_reason: str | None = None
+
+
+class PortfolioBucket(BaseModel):
+    key: str
+    label: str
+    count: int
+    share: float  # 0..1
+
+
+class PortfolioSummary(BaseModel):
+    total_msmes: int
+    avg_composite_score: float
+    avg_pd: float
+    total_exposure_paise: int  # sum of suggested limits (approved only)
+    ntc_ntb_count: int  # MSMEs approved despite no bureau footprint
+    watchlist_count: int
+    band_distribution: list[PortfolioBucket]
+    sector_mix: list[PortfolioBucket]
+    recommendation_mix: list[PortfolioBucket]
+    entries: list[PortfolioEntry]
+    generated_at: datetime
