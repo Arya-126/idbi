@@ -48,3 +48,28 @@
   font-size: 11px;
   fill: theme("colors.ink.500");
 }
+
+/* Print output — clean white page, no grid backdrop, hide nav/footer/print-hidden. */
+@media print {
+  body {
+    background: #fff !important;
+  }
+  header, footer, .print\:hidden {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .card {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border-color: theme("colors.ink.200") !important;
+  }
+  #printable-card {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  a[href]:after {
+    content: "";
+  }
+}

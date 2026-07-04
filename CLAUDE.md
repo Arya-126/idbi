@@ -67,13 +67,19 @@ Claude should know these terms; they appear throughout the project:
 - `backend/app/consent.py` — in-memory consent registry: issue, validate (GSTIN match / status / expiry), revoke, and a documented demo fallback that auto-issues a grant when a pull arrives without a handle.
 - `backend/app/connectors/` — thin adapters implementing `IdentityConnector` / `GstConnector` / `AaConnector` / `EpfoConnector` / `UpiConnector` protocols; `ConnectorSet` (in `base.py`) is typed against the protocols so the engine never imports mock classes. Mock impls dispatch to `personas.build_data_pack`; the mock AA connector rejects unknown/revoked/expired consent handles. Real impls would call GSTN / AA / EPFO / NPCI.
 - `backend/app/scoring/` — feature engineering (`features.py`, including time-series trend features: filing-timeliness trend, balance trajectory, EMI trajectory), the six dimension scorers with factor decomposition (`dimensions.py`), composite/decision logic (`decision.py` — top strengths/risks ranked by contribution × dimension weight), and the orchestrator that assembles a `HealthCard` (`engine.py`). Weights live in `dimensions.WEIGHTS` — adjust in one place.
-- `backend/app/main.py` — FastAPI app: `/api/msme`, `/api/consent` (+ `/api/consent/{id}/revoke`), `/api/msme/{gstin}/data-pack`, `/api/msme/{gstin}/health-card` (both accept `?consent=`), `/api/portfolio` (+ `/api/portfolio/refresh`). `startup` hook trains the ML model and pre-builds the portfolio cache so first requests are fast.
+- `backend/app/main.py` — FastAPI app: consent (`/api/consent`, revoke, `/api/consent/log`), data (`/api/msme/{gstin}/data-pack` and `/health-card`), portfolio (`/api/portfolio` + refresh), impact (`/api/impact`), ULI/OCEN sim (`/api/uli/pull`, `/api/ocen/loan-request`), applications (`/api/msme/{gstin}/apply`, `/api/applications`, `/sanction`). `startup` hook trains the ML model and pre-builds the portfolio cache so first requests are fast.
+- `backend/app/scoring/recommendations.py` — actionable "do X → gain ~Y pts" suggestions per dimension, surfaced in the borrower view.
+- `backend/app/scoring/benchmarks.py` — per-sector percentile tables built once from the portfolio at startup; `benchmark=False` on the bootstrap pass avoids recursion.
+- `backend/app/impact.py` — before/after comparator: runs each portfolio member through a "traditional bureau-only" rule (reject NTC / short vintage / sub-scale / proprietorship-under-threshold) and reports the coverage, exposure and NTC/NTB inclusion lift.
+- `backend/app/ecosystem.py` — ULI and OCEN request simulators; returns a timeline of hops (LSP → ULI → Bank → AA → FIP → back) alongside the health card / sanction the request produced.
+- `backend/app/applications.py` — in-memory loan-application registry + sanction-letter issuer; EMI/covenants derived from the decision terms.
 - `backend/app/ml_data.py` — synthetic-population sampler + ground-truth default simulator. Same generator serves both ML training and the portfolio "book" view. NTC sampled firms carry no EMIs (no credit history by definition); ~40% of the book is NTB.
 - `backend/app/ml.py` — `PdModel` (scikit-learn `HistGradientBoostingClassifier`) with a canonical 18-feature vector, an 80/20 holdout AUC computed at train time (surfaced on the card), local counterfactual explainer (drivers / supports), and version hash. Training uses a fast persona-to-features shortcut; scoring uses production features from the connectors — a known, documented train/serve skew (see the docstring in `ml.py`).
 - `backend/app/portfolio.py` — assembles the 30-MSME book (5 demos + 25 sampled), scores each, and caches summary metrics (band mix, sector mix, recommendation mix, exposure, watchlist, flag-based NTC/NTB count). Cache is dropped via `POST /api/portfolio/refresh`.
-- `frontend/src/pages/` — four routes: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow; performs a real `/data-pack` pull with the issued handle and shows actual record counts) → `HealthCard` (full scored card with ML panel, plus a credit-officer / borrower view toggle; the consent handle rides along via sessionStorage) and `Portfolio` (credit-officer book view with NTC/NTB filter + re-score button).
-- `frontend/src/components/` — `HealthHeader`, `ScoreDial` (custom SVG dial), `DimensionRadar` (Recharts), `DimensionCard`, `DecisionPanel`, `StrengthsRisks`, `MlPanel` (ML PD + drivers/supports), `DataFreshness`.
-- `frontend/src/api.ts` — thin fetch client; `types.ts` mirrors backend schemas (kept in sync manually).
+- `frontend/src/pages/` — routes: `Landing` (portfolio picker) → `Consent` (source-by-source consent flow with real `/data-pack` pull) → `HealthCard` (scored card with print/PDF button + Apply CTA; officer/borrower view toggle; consent handle rides via sessionStorage), `Portfolio` (book view — NTC/NTB filter, trend column, EWS badges, re-score), `Impact` (before/after vs bureau-only lender), `Ecosystem` (ULI/OCEN wire-timeline simulator), `SanctionLetter` (printable letter after Apply), `ConsentLog` (compliance audit view of every consent artefact).
+- `frontend/src/components/` — `HealthHeader`, `ScoreDial`, `DimensionRadar`, `DimensionCard` (peer-percentile chip), `DecisionPanel` (limit workings toggle + apply button slot), `StrengthsRisks`, `MlPanel`, `DataFreshness`, `RecommendationsPanel`, `ScoreHistoryChart`, `ApplyButton`, `WhatsAppToaster` (borrower notification toasts fired at consent / sanction / decline events).
+- `frontend/src/i18n.tsx` — tiny EN / हिं dictionary + `LangProvider`; nav labels swap live, mechanism ready for wider borrower-facing translation.
+- `frontend/src/api.ts` — thin fetch client covering every endpoint; `types.ts` mirrors backend schemas (kept in sync manually).
 
 ## Scoring Model Design (initial direction)
 
@@ -123,8 +129,14 @@ npm run build          # production build (also runs `tsc`)
 - `POST /api/consent/{id}/revoke` — revoke a grant
 - `GET /api/msme/{gstin}/data-pack?consent=` — normalized GST + AA + EPFO + UPI (bad handle → 403)
 - `GET /api/msme/{gstin}/health-card?consent=` — full scored card + ML PD (bad handle → 403)
-- `GET /api/portfolio` — 30-MSME book with band/sector/recommendation mix and watch-list (cached at startup)
+- `GET /api/portfolio` — 30-MSME book with band/sector/recommendation mix, trend + EWS flags, watch-list (cached at startup)
 - `POST /api/portfolio/refresh` — invalidate + re-score the book
+- `GET /api/impact` — before/after comparison vs a bureau-only lender
+- `POST /api/uli/pull` — simulated ULI health-card pull; returns event timeline + card
+- `POST /api/ocen/loan-request` — simulated OCEN loan draft against an existing card
+- `POST /api/msme/{gstin}/apply` — create loan application (auto-sanction if APPROVE)
+- `GET /api/applications` / `/{id}` / `/{id}/sanction` — application + sanction-letter retrieval
+- `GET /api/consent/log` — every consent artefact issued this session
 - Interactive docs at `/docs`
 
 **Sanity checks:**

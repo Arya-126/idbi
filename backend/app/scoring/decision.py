@@ -8,7 +8,7 @@ gates on the underlying features (bounces, DSCR).
 
 from __future__ import annotations
 
-from ..schemas import Decision, DimensionScore
+from ..schemas import Decision, DimensionScore, LimitStep
 from .features import Features, fmt_paise_short, L_PAISE
 
 
@@ -27,17 +27,52 @@ def risk_band(composite: int) -> str:
     return "D"
 
 
-def _suggested_limit(band: str, features: Features) -> int:
+def _suggested_limit(band: str, features: Features) -> tuple[int, list[LimitStep]]:
     """A share of annual turnover, tempered by cash surplus.
 
-    Cap on band-multiplier × avg monthly turnover; also cap at 18× monthly
-    net surplus so we never issue a limit the borrower can't service.
+    Two caps:
+      · Turnover cap: band multiplier × avg monthly turnover (A=3×, B=2×, C=1×).
+      · Surplus cap: 18 months of net monthly cash surplus — never issue a
+        limit the borrower's own cash flow can't service.
+
+    Returns the limit AND the ordered steps that produced it, so the UI can
+    render the same math the credit officer would walk through.
     """
     turnover_multiplier = {"A": 3.0, "B": 2.0, "C": 1.0, "D": 0.0}[band]
     turnover_cap = int(features.avg_monthly_turnover_paise * turnover_multiplier)
     surplus = max(0, features.monthly_surplus_paise)
     surplus_cap = surplus * 18
-    return min(turnover_cap, surplus_cap) if surplus_cap else turnover_cap
+    final = min(turnover_cap, surplus_cap) if surplus_cap else turnover_cap
+    binding = "surplus" if surplus_cap and surplus_cap < turnover_cap else "turnover"
+
+    steps: list[LimitStep] = [
+        LimitStep(
+            label="Avg monthly turnover",
+            value_paise=features.avg_monthly_turnover_paise,
+            note="From GST outward taxable value, last 24 months",
+        ),
+        LimitStep(
+            label=f"Turnover cap ({turnover_multiplier:g}× · band {band})",
+            value_paise=turnover_cap,
+            note=f"Band {band} caps at {turnover_multiplier:g}× monthly turnover",
+        ),
+        LimitStep(
+            label="Monthly cash surplus",
+            value_paise=surplus,
+            note="Inflow − outflow from Account Aggregator bank data",
+        ),
+        LimitStep(
+            label="Surplus cap (18× surplus)",
+            value_paise=surplus_cap,
+            note="Ensures 18 months of cash flow covers any drawdown",
+        ),
+        LimitStep(
+            label="Suggested limit",
+            value_paise=final,
+            note=f"min of the two caps — {binding} cap is binding",
+        ),
+    ]
+    return final, steps
 
 
 def _hard_gates(features: Features) -> list[str]:
@@ -66,10 +101,11 @@ def decide(composite: int, band: str, features: Features) -> Decision:
                 + (f"Blocking factors: {'; '.join(gates)}." if gates else
                    "Cash-flow and compliance signals are insufficient.")
             ),
+            limit_workings=[],
         )
 
     if band == "C" or gates:
-        limit = _suggested_limit("C", features)
+        limit, workings = _suggested_limit("C", features)
         return Decision(
             recommendation="REFER",
             suggested_limit_paise=limit,
@@ -80,10 +116,11 @@ def decide(composite: int, band: str, features: Features) -> Decision:
                 + (f"Concerns: {'; '.join(gates)}." if gates else
                    "Consider requiring collateral or co-applicant.")
             ),
+            limit_workings=workings,
         )
 
     if band == "B":
-        limit = _suggested_limit("B", features)
+        limit, workings = _suggested_limit("B", features)
         return Decision(
             recommendation="APPROVE",
             suggested_limit_paise=limit,
@@ -94,10 +131,11 @@ def decide(composite: int, band: str, features: Features) -> Decision:
                 f"Suggested limit ~{fmt_paise_short(limit)} at 12.5% p.a. over 24 months, "
                 "reviewable after 6 months of good repayment."
             ),
+            limit_workings=workings,
         )
 
     # Band A
-    limit = _suggested_limit("A", features)
+    limit, workings = _suggested_limit("A", features)
     return Decision(
         recommendation="APPROVE",
         suggested_limit_paise=limit,
@@ -108,6 +146,7 @@ def decide(composite: int, band: str, features: Features) -> Decision:
             f"Suggested limit ~{fmt_paise_short(limit)} at 10.5% p.a. over 36 months, "
             "eligible for straight-through processing."
         ),
+        limit_workings=workings,
     )
 
 

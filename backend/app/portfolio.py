@@ -63,9 +63,41 @@ def _register_sampled_personas(n: int, seed: int) -> list[Persona]:
 
 
 def _build_entry(p: Persona) -> PortfolioEntry:
-    card = score_gstin(p.gstin)
+    # benchmark=False during portfolio build — the benchmarks themselves are
+    # constructed from these calls, so recurring would deadlock.
+    card = score_gstin(p.gstin, benchmark=False)
 
-    # Watch-list rules
+    # Trend from the score history — recent vs earlier window, with a lower
+    # bar so young MSMEs (<6 history points) still get a directional read.
+    trend = "UNKNOWN"
+    hist = card.score_history
+    if len(hist) >= 3:
+        half = max(1, len(hist) // 3)
+        recent = sum(pt.composite_score for pt in hist[-half:]) / half
+        earlier = sum(pt.composite_score for pt in hist[:half]) / half
+        delta = recent - earlier
+        if delta > 15:
+            trend = "IMPROVING"
+        elif delta < -15:
+            trend = "DECLINING"
+        else:
+            trend = "STABLE"
+
+    # EWS: light-touch triggers derived from the health card itself.
+    ews_flags: list[str] = []
+    if trend == "DECLINING":
+        ews_flags.append("Score trending down")
+    if card.ml_assessment.probability_of_default > 0.15:
+        ews_flags.append(f"PD elevated ({card.ml_assessment.probability_of_default * 100:.0f}%)")
+    for risk in card.top_risks[:2]:
+        # Surface the two biggest risk headlines only (trim the "— detail").
+        head = risk.split(" — ", 1)[0]
+        ews_flags.append(head)
+    # Dedupe while preserving order.
+    seen = set()
+    ews_flags = [f for f in ews_flags if not (f in seen or seen.add(f))]
+
+    # Watch-list rules (unchanged behaviour + trend signal).
     reasons: list[str] = []
     if card.decision.recommendation == "DECLINE":
         reasons.append("Rulebook declines")
@@ -73,6 +105,8 @@ def _build_entry(p: Persona) -> PortfolioEntry:
         reasons.append(f"ML PD {card.ml_assessment.probability_of_default * 100:.0f}%")
     if card.decision.recommendation == "REFER":
         reasons.append("Referred for underwriter review")
+    if trend == "DECLINING":
+        reasons.append("Trend declining")
 
     demo_gstins = {p.gstin for p in personas.PERSONAS[:5]}
 
@@ -94,6 +128,8 @@ def _build_entry(p: Persona) -> PortfolioEntry:
         is_ntb=p.is_ntb,
         is_watchlist=len(reasons) > 0,
         watchlist_reason=" · ".join(reasons) if reasons else None,
+        trend=trend,  # type: ignore[arg-type]
+        ews_flags=ews_flags[:3],
     )
 
 
@@ -162,5 +198,9 @@ def build_portfolio() -> PortfolioSummary:
 
 
 def invalidate() -> None:
+    """Drop the portfolio cache. Also invalidates sector benchmarks — they're
+    derived from the portfolio so they must be rebuilt in step."""
     global _summary
     _summary = None
+    from .scoring.benchmarks import invalidate as invalidate_bench
+    invalidate_bench()

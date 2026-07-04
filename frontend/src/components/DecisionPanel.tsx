@@ -1,15 +1,19 @@
+import { useState } from "react";
 import type { Decision } from "../types";
 import { paiseToInr, recommendationStyle } from "../utils/format";
 
 export default function DecisionPanel({
   decision,
   band,
+  extraTail,
 }: {
   decision: Decision;
   band: string;
+  extraTail?: React.ReactNode;
 }) {
   const rec = recommendationStyle(decision.recommendation);
   const declined = decision.recommendation === "DECLINE";
+  const [showMath, setShowMath] = useState(false);
   return (
     <section className="card p-6">
       <div className="flex items-baseline justify-between">
@@ -44,6 +48,41 @@ export default function DecisionPanel({
         </div>
       )}
 
+      {decision.limit_workings.length > 0 && (
+        <div className="mt-4">
+          <button
+            onClick={() => setShowMath((s) => !s)}
+            className="text-[11px] text-brand-700 hover:underline"
+          >
+            {showMath ? "▾ Hide the math" : "▸ How did we get this limit?"}
+          </button>
+          {showMath && (
+            <ul className="mt-2 space-y-1.5 text-xs">
+              {decision.limit_workings.map((step, i) => {
+                const isFinal = i === decision.limit_workings.length - 1;
+                return (
+                  <li
+                    key={i}
+                    className={
+                      "grid grid-cols-[1fr_auto] gap-3 py-1.5 border-b border-ink-100 last:border-b-0 " +
+                      (isFinal ? "font-semibold text-ink-900" : "text-ink-700")
+                    }
+                  >
+                    <div>
+                      <div>{step.label}</div>
+                      <div className="text-[10px] text-ink-500">{step.note}</div>
+                    </div>
+                    <div className="font-mono tabular-nums self-center">
+                      {paiseToInr(step.value_paise)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="mt-5 border-t border-ink-100 pt-4">
         <div className="text-[11px] uppercase tracking-wider text-ink-500">
           Rationale
@@ -52,6 +91,8 @@ export default function DecisionPanel({
           {decision.rationale}
         </p>
       </div>
+
+      {extraTail}
     </section>
   );
 }

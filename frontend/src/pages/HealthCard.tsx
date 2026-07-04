@@ -10,6 +10,9 @@ import DecisionPanel from "../components/DecisionPanel";
 import StrengthsRisks from "../components/StrengthsRisks";
 import DataFreshness from "../components/DataFreshness";
 import MlPanel from "../components/MlPanel";
+import RecommendationsPanel from "../components/RecommendationsPanel";
+import ScoreHistoryChart from "../components/ScoreHistoryChart";
+import ApplyButton from "../components/ApplyButton";
 
 type View = "officer" | "borrower";
 
@@ -22,10 +25,6 @@ export default function HealthCardPage() {
   useEffect(() => {
     if (!gstin) return;
     setCard(null);
-    // Consent handle from the consent step; deep links fall back to the
-    // backend's documented demo auto-grant. A 403 means the stored handle
-    // went stale (e.g. backend restart wiped the in-memory registry) —
-    // drop it and retry once without.
     const consent = storedConsent(gstin);
     api
       .healthCard(gstin, consent)
@@ -56,9 +55,15 @@ export default function HealthCardPage() {
   if (!card) return <CardSkeleton />;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8 space-y-6">
-      <div className="flex justify-end">
+    <div className="mx-auto max-w-7xl px-6 py-8 space-y-6" id="printable-card">
+      <div className="flex justify-between items-center print:hidden">
         <ViewToggle view={view} onChange={setView} />
+        <button
+          onClick={() => window.print()}
+          className="btn-ghost !py-1 !px-2.5 text-xs border border-ink-200 rounded-lg"
+        >
+          ⇩ Print / Save PDF
+        </button>
       </div>
       <HealthHeader card={card} />
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
@@ -72,15 +77,31 @@ export default function HealthCardPage() {
             </span>
           </div>
           <DimensionRadar dimensions={card.dimensions} />
+          {card.score_history.length > 0 && (
+            <div className="mt-6 border-t border-ink-100 pt-4">
+              <ScoreHistoryChart points={card.score_history} />
+            </div>
+          )}
         </section>
         {view === "officer" ? (
-          <DecisionPanel decision={card.decision} band={card.risk_band} />
+          <DecisionPanel
+            decision={card.decision}
+            band={card.risk_band}
+            extraTail={
+              gstin && card.decision.recommendation !== "DECLINE" ? (
+                <ApplyButton gstin={gstin} />
+              ) : null
+            }
+          />
         ) : (
           <BorrowerPanel card={card} />
         )}
       </div>
 
       {view === "officer" && <MlPanel ml={card.ml_assessment} />}
+      {view === "borrower" && (
+        <RecommendationsPanel items={card.improvement_recommendations} />
+      )}
 
       <StrengthsRisks
         strengths={card.top_strengths}
@@ -142,8 +163,6 @@ const BAND_PLAIN: Record<string, string> = {
   D: "Your current signals would make credit difficult — the points below show what to improve.",
 };
 
-// The same scored card, in plain language for the MSME owner: what the band
-// means, what's working, and what to improve — no underwriter internals.
 function BorrowerPanel({ card }: { card: HealthCard }) {
   return (
     <section className="card p-6">
@@ -151,24 +170,6 @@ function BorrowerPanel({ card }: { card: HealthCard }) {
         What this means for your business
       </h2>
       <p className="mt-2 text-sm text-ink-700">{BAND_PLAIN[card.risk_band]}</p>
-      {card.top_risks.length > 0 && (
-        <div className="mt-4">
-          <div className="text-[10px] uppercase tracking-wider text-ink-500">
-            To improve your score
-          </div>
-          <ul className="mt-1.5 space-y-1.5 text-xs text-ink-700 list-disc pl-4">
-            {card.top_risks.map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {card.top_risks.length === 0 && (
-        <p className="mt-4 text-xs text-ink-600">
-          No major risk signals right now — keep filings and repayments on
-          time to hold this score.
-        </p>
-      )}
       <p className="mt-4 text-[11px] text-ink-500">
         Score built only from data you consented to share (GST, bank, EPFO,
         UPI). You can revoke consent at any time.

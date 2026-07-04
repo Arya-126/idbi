@@ -172,8 +172,9 @@ export default function PortfolioPage() {
                   <th className="px-4 py-2 font-medium text-right">Turnover</th>
                   <th className="px-4 py-2 font-medium text-right">Score</th>
                   <th className="px-4 py-2 font-medium text-center">Band</th>
+                  <th className="px-4 py-2 font-medium text-center">Trend</th>
                   <th className="px-4 py-2 font-medium text-right">PD</th>
-                  <th className="px-4 py-2 font-medium">Decision</th>
+                  <th className="px-4 py-2 font-medium">Decision / EWS</th>
                   <th className="px-4 py-2 font-medium text-right">Limit</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -229,6 +230,9 @@ export default function PortfolioPage() {
                         {e.risk_band}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <TrendChip trend={e.trend} />
+                    </td>
                     <td
                       className={clsx(
                         "px-4 py-3 text-right font-mono tabular-nums text-xs",
@@ -250,9 +254,16 @@ export default function PortfolioPage() {
                       >
                         {recommendationStyle(e.recommendation).label}
                       </span>
-                      {e.watchlist_reason && (
-                        <div className="text-[10px] text-red-600 mt-0.5 truncate max-w-56">
-                          {e.watchlist_reason}
+                      {e.ews_flags.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1 max-w-64">
+                          {e.ews_flags.map((f, i) => (
+                            <span
+                              key={i}
+                              className="pill bg-red-50 text-red-700 border border-red-200 text-[9px]"
+                            >
+                              ⚠ {f}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </td>
@@ -277,6 +288,42 @@ export default function PortfolioPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function TrendChip({ trend }: { trend: string }) {
+  const map: Record<string, { glyph: string; className: string; label: string }> = {
+    IMPROVING: {
+      glyph: "↑",
+      className: "bg-brand-50 text-brand-700 border-brand-200",
+      label: "up",
+    },
+    STABLE: {
+      glyph: "→",
+      className: "bg-ink-100 text-ink-600 border-ink-200",
+      label: "flat",
+    },
+    DECLINING: {
+      glyph: "↓",
+      className: "bg-red-50 text-red-700 border-red-200",
+      label: "down",
+    },
+    UNKNOWN: {
+      glyph: "·",
+      className: "bg-ink-50 text-ink-400 border-ink-100",
+      label: "—",
+    },
+  };
+  const t = map[trend] ?? map.UNKNOWN;
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] " +
+        t.className
+      }
+    >
+      <span className="font-mono">{t.glyph}</span> {t.label}
+    </span>
   );
 }
 

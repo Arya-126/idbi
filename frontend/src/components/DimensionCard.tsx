@@ -19,6 +19,24 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
           </div>
           <div className="text-[10px] uppercase tracking-wider text-ink-500 mt-1">
             weight {(dim.weight * 100).toFixed(0)}% ·{" "}
+            {dim.peer_percentile != null && (
+              <>
+                <span
+                  className={
+                    "font-medium " +
+                    (dim.peer_percentile >= 75
+                      ? "text-brand-700"
+                      : dim.peer_percentile <= 25
+                        ? "text-red-700"
+                        : "text-ink-600")
+                  }
+                  title="Percentile among same-sector peers in the portfolio"
+                >
+                  {percentileLabel(dim.peer_percentile)}
+                </span>{" "}
+                ·{" "}
+              </>
+            )}
             <span className={trendColor(dim.trend)}>
               {trendGlyph(dim.trend)} {dim.trend.toLowerCase()}
             </span>
@@ -41,6 +59,12 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
           style={{ width: `${dim.score}%` }}
         />
       </div>
+
+      {dim.peer_percentile != null && (
+        <div className="mt-1 text-[10px] text-ink-500">
+          {percentileNarrative(dim.peer_percentile, dim.label)}
+        </div>
+      )}
 
       <div className="mt-4 space-y-2">
         {dim.factors.map((f, i) => (
@@ -77,4 +101,19 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
       </div>
     </div>
   );
+}
+
+function percentileLabel(p: number): string {
+  if (p >= 90) return `top 10% in sector`;
+  if (p >= 75) return `top ${100 - p}% in sector`;
+  if (p >= 50) return `median for sector`;
+  if (p >= 25) return `bottom ${p}% in sector`;
+  return `bottom ${p}% in sector`;
+}
+
+function percentileNarrative(p: number, label: string): string {
+  if (p >= 75) return `Ahead of ${p}% of same-sector peers on ${label.toLowerCase()}.`;
+  if (p >= 50) return `Around the sector median on ${label.toLowerCase()}.`;
+  if (p >= 25) return `Behind the sector median — ${p}th percentile.`;
+  return `Bottom ${p}% of same-sector peers — priority area to improve.`;
 }

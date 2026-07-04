@@ -22,17 +22,31 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from datetime import datetime
+
+from . import applications as apps_store
 from . import consent as consent_store
+from . import ecosystem
 from . import personas
 from .consent import ConsentError
+from .impact import compute_impact
 from .portfolio import build_portfolio, invalidate
 from .schemas import (
+    ApplyRequest,
     ConsentGrant,
+    ConsentLogEntry,
     ConsentRequest,
     DataPack,
     HealthCard,
+    ImpactSummary,
+    LoanApplication,
     MsmeSummary,
+    OcenLoanRequest,
+    OcenLoanResponse,
     PortfolioSummary,
+    SanctionLetter,
+    UliPullRequest,
+    UliPullResponse,
 )
 from .scoring.engine import build_data_pack, score_gstin  # noqa: F401
 
@@ -136,3 +150,104 @@ def get_health_card(gstin: str, consent: str | None = None) -> HealthCard:
         raise _not_found(gstin)
     except ConsentError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
+
+
+# ─── Loan applications + sanction letters ────────────────────────────────────
+
+
+@app.post("/api/msme/{gstin}/apply", response_model=LoanApplication)
+def apply(
+    gstin: str,
+    req: ApplyRequest,
+    consent: str | None = None,
+) -> LoanApplication:
+    try:
+        card = score_gstin(gstin, consent)
+    except KeyError:
+        raise _not_found(gstin)
+    except ConsentError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    app_obj, _letter = apps_store.apply_for_credit(card.enterprise, card, req)
+    return app_obj
+
+
+@app.get("/api/applications", response_model=list[LoanApplication])
+def list_apps() -> list[LoanApplication]:
+    return apps_store.list_applications()
+
+
+@app.get("/api/applications/{application_id}", response_model=LoanApplication)
+def get_app(application_id: str) -> LoanApplication:
+    a = apps_store.get_application(application_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="Unknown application")
+    return a
+
+
+@app.get("/api/applications/{application_id}/sanction", response_model=SanctionLetter)
+def sanction_for(application_id: str) -> SanctionLetter:
+    letter = apps_store.letter_for_application(application_id)
+    if letter is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No sanction letter — application not in SANCTIONED state",
+        )
+    return letter
+
+
+# ─── Before/after impact dashboard ───────────────────────────────────────────
+
+
+@app.get("/api/impact", response_model=ImpactSummary)
+def impact() -> ImpactSummary:
+    return compute_impact()
+
+
+# ─── ULI / OCEN simulated flow ───────────────────────────────────────────────
+
+
+@app.post("/api/uli/pull", response_model=UliPullResponse)
+def uli_pull(req: UliPullRequest) -> UliPullResponse:
+    try:
+        card = score_gstin(req.gstin)
+    except KeyError:
+        card = None
+    return ecosystem.simulate_uli_pull(req, card)
+
+
+@app.post("/api/ocen/loan-request", response_model=OcenLoanResponse)
+def ocen_loan(req: OcenLoanRequest) -> OcenLoanResponse:
+    try:
+        card = score_gstin(req.gstin)
+    except KeyError:
+        raise _not_found(req.gstin)
+    app_obj, _letter = apps_store.apply_for_credit(
+        card.enterprise, card,
+        ApplyRequest(amount_paise=req.amount_paise, tenor_months=req.tenor_months),
+        channel="OCEN",
+    )
+    return ecosystem.simulate_ocen_loan(req, card, app_obj.application_id)
+
+
+# ─── Consent audit log ───────────────────────────────────────────────────────
+
+
+@app.get("/api/consent/log", response_model=list[ConsentLogEntry])
+def consent_log() -> list[ConsentLogEntry]:
+    now = datetime.utcnow()
+    entries: list[ConsentLogEntry] = []
+    for grant in consent_store._by_id.values():  # noqa: SLF001 — demo introspection
+        persona = personas.get_persona(grant.gstin)
+        status = grant.status
+        if status == "GRANTED" and grant.expires_at < now:
+            status = "EXPIRED"
+        entries.append(ConsentLogEntry(
+            consent_id=grant.consent_id,
+            gstin=grant.gstin,
+            trade_name=persona.trade_name if persona else grant.gstin,
+            sources=grant.sources,
+            granted_at=grant.granted_at,
+            expires_at=grant.expires_at,
+            status=status,  # type: ignore[arg-type]
+        ))
+    return sorted(entries, key=lambda e: e.granted_at, reverse=True)

@@ -1,10 +1,16 @@
 import type {
   ConsentGrant,
+  ConsentLogEntry,
   ConsentSource,
   DataPackLite,
   HealthCard,
+  ImpactSummary,
+  LoanApplication,
   MsmeSummary,
+  OcenLoanResponse,
   PortfolioSummary,
+  SanctionLetter,
+  UliPullResponse,
 } from "./types";
 
 const BASE = "/api";
@@ -39,6 +45,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ gstin, sources }),
     }),
+  impact: () => req<ImpactSummary>("/impact"),
+  uliPull: (gstin: string, product = "WORKING_CAPITAL") =>
+    req<UliPullResponse>("/uli/pull", {
+      method: "POST",
+      body: JSON.stringify({ gstin, product }),
+    }),
+  ocenLoan: (gstin: string, amount_paise: number, tenor_months: number) =>
+    req<OcenLoanResponse>("/ocen/loan-request", {
+      method: "POST",
+      body: JSON.stringify({ gstin, amount_paise, tenor_months }),
+    }),
+  applyForCredit: (gstin: string, consent?: string, amount_paise?: number, tenor_months?: number) =>
+    req<LoanApplication>(withConsent(`/msme/${gstin}/apply`, consent), {
+      method: "POST",
+      body: JSON.stringify({ amount_paise, tenor_months }),
+    }),
+  listApplications: () => req<LoanApplication[]>("/applications"),
+  getApplication: (id: string) => req<LoanApplication>(`/applications/${id}`),
+  sanctionLetter: (id: string) =>
+    req<SanctionLetter>(`/applications/${id}/sanction`),
+  consentLog: () => req<ConsentLogEntry[]>("/consent/log"),
 };
 
 // The consent handle survives the Consent → HealthCard hop via sessionStorage.

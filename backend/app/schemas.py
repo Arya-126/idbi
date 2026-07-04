@@ -183,6 +183,16 @@ class DimensionScore(BaseModel):
     trend: Literal["IMPROVING", "STABLE", "DECLINING", "UNKNOWN"]
     factors: list[Factor]
     summary: str  # one-liner
+    # Percentile vs same-sector peers in the portfolio (0..100). None when the
+    # sector has fewer than a handful of peers to benchmark against.
+    peer_percentile: int | None = None
+
+
+class LimitStep(BaseModel):
+    """One line in the limit-derivation workings shown on the UI."""
+    label: str
+    value_paise: int
+    note: str
 
 
 class Decision(BaseModel):
@@ -191,6 +201,7 @@ class Decision(BaseModel):
     suggested_tenor_months: int
     suggested_roi_pct: float
     rationale: str
+    limit_workings: list[LimitStep] = []
 
 
 class MlDriver(BaseModel):
@@ -216,6 +227,21 @@ class MlAssessment(BaseModel):
     summary: str  # one-line agreement/disagreement with the rulebook decision
 
 
+class Recommendation(BaseModel):
+    """A specific improvement suggestion for the MSME owner."""
+    dimension_key: str          # which dimension this lifts
+    action: str                  # short imperative title
+    detail: str                  # human explanation
+    est_score_uplift_pts: int    # rough dimension-score gain if actioned
+    time_horizon_months: int     # how long to see the effect
+
+
+class ScoreHistoryPoint(BaseModel):
+    period: str          # "YYYY-MM"
+    composite_score: int
+    risk_band: Literal["A", "B", "C", "D"]
+
+
 class HealthCard(BaseModel):
     enterprise: EnterpriseIdentity
     composite_score: int = Field(ge=0, le=1000)
@@ -225,6 +251,8 @@ class HealthCard(BaseModel):
     top_risks: list[str]
     decision: Decision
     ml_assessment: MlAssessment
+    improvement_recommendations: list[Recommendation] = []
+    score_history: list[ScoreHistoryPoint] = []
     generated_at: datetime
     data_freshness: dict[str, date | None]  # None = source not available
     disclaimer: str = (
@@ -292,6 +320,10 @@ class PortfolioEntry(BaseModel):
     is_ntb: bool   # New-to-Bank: banks elsewhere; data arrives via the AA rail
     is_watchlist: bool
     watchlist_reason: str | None = None
+    # Recent-vs-earlier direction across GST turnover + filing timeliness.
+    trend: Literal["IMPROVING", "STABLE", "DECLINING", "UNKNOWN"] = "UNKNOWN"
+    # Early-warning triggers surfaced on the officer's book view.
+    ews_flags: list[str] = []
 
 
 class PortfolioBucket(BaseModel):
@@ -313,3 +345,139 @@ class PortfolioSummary(BaseModel):
     recommendation_mix: list[PortfolioBucket]
     entries: list[PortfolioEntry]
     generated_at: datetime
+
+
+# ─── Before/after impact dashboard ──────────────────────────────────────────
+
+
+class ImpactRow(BaseModel):
+    """One before/after row: what a bureau-only lender would say vs. what
+    this system says."""
+    gstin: str
+    trade_name: str
+    sector: str
+    monthly_turnover_paise: int
+    is_ntc: bool
+    is_ntb: bool
+    traditional_verdict: Literal["APPROVE", "REJECT"]
+    traditional_reason: str
+    alternate_verdict: Literal["APPROVE", "REFER", "DECLINE"]
+    alternate_limit_paise: int
+    probability_of_default: float
+
+
+class ImpactMetric(BaseModel):
+    key: str
+    label: str
+    traditional: str  # rendered value
+    alternate: str
+    lift: str  # human-readable direction / delta
+    positive: bool  # tint the delta green vs red
+
+
+class ImpactSummary(BaseModel):
+    total_msmes: int
+    traditional_approvals: int
+    alternate_approvals: int
+    additional_msmes_served: int  # alternate approves that traditional rejects
+    ntc_ntb_included: int
+    additional_exposure_paise: int
+    estimated_default_rate_lift_pp: float  # extra portfolio risk taken on
+    metrics: list[ImpactMetric]
+    rescued_rows: list[ImpactRow]  # alternate = APPROVE / REFER, traditional = REJECT
+    generated_at: datetime
+
+
+# ─── ULI / OCEN simulated flow ──────────────────────────────────────────────
+
+
+class UliEvent(BaseModel):
+    step: int
+    actor: Literal["LSP", "OCEN", "ULI", "BANK", "AA", "FIP", "BORROWER"]
+    action: str        # e.g. "POST /uli/pull"
+    detail: str        # short human blurb
+    latency_ms: int
+    ok: bool
+
+
+class UliPullRequest(BaseModel):
+    gstin: str
+    lsp_id: str = "LSP-DEMO-01"
+    product: Literal["WORKING_CAPITAL", "TERM_LOAN", "INVOICE_DISCOUNTING"] = (
+        "WORKING_CAPITAL"
+    )
+
+
+class UliPullResponse(BaseModel):
+    trace_id: str
+    events: list[UliEvent]
+    health_card: HealthCard | None
+    total_latency_ms: int
+
+
+class OcenLoanRequest(BaseModel):
+    gstin: str
+    amount_paise: int
+    tenor_months: int
+    lsp_id: str = "LSP-DEMO-01"
+
+
+class OcenLoanResponse(BaseModel):
+    trace_id: str
+    events: list[UliEvent]
+    decision: Literal["SANCTIONED", "REFERRED", "REJECTED"]
+    sanctioned_amount_paise: int
+    tenor_months: int
+    roi_pct: float
+    application_id: str | None  # created when SANCTIONED / REFERRED
+
+
+# ─── Loan applications + sanction letters ───────────────────────────────────
+
+
+class LoanApplication(BaseModel):
+    application_id: str
+    gstin: str
+    trade_name: str
+    amount_paise: int
+    tenor_months: int
+    roi_pct: float
+    status: Literal["DRAFT", "SANCTIONED", "UNDER_REVIEW", "REJECTED"]
+    created_at: datetime
+    channel: Literal["DIRECT", "ULI", "OCEN"] = "DIRECT"
+    rationale: str
+
+
+class ApplyRequest(BaseModel):
+    # Optional overrides — defaults come from the recommended decision.
+    amount_paise: int | None = None
+    tenor_months: int | None = None
+
+
+class SanctionLetter(BaseModel):
+    letter_id: str
+    application_id: str
+    enterprise: EnterpriseIdentity
+    amount_paise: int
+    tenor_months: int
+    roi_pct: float
+    processing_fee_paise: int
+    monthly_emi_paise: int
+    covenants: list[str]
+    issued_at: datetime
+    valid_until: datetime
+    bank_name: str = "IDBI Bank"
+    reference_number: str  # SL-YYYYMMDD-XXXX
+
+
+# ─── Consent audit log ──────────────────────────────────────────────────────
+
+
+class ConsentLogEntry(BaseModel):
+    consent_id: str
+    gstin: str
+    trade_name: str
+    sources: list[ConsentSource]
+    granted_at: datetime
+    expires_at: datetime
+    status: Literal["PENDING", "GRANTED", "REVOKED", "EXPIRED"]

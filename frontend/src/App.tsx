@@ -4,21 +4,34 @@ import LandingPage from "./pages/Landing";
 import ConsentPage from "./pages/Consent";
 import HealthCardPage from "./pages/HealthCard";
 import PortfolioPage from "./pages/Portfolio";
+import ImpactPage from "./pages/Impact";
+import EcosystemPage from "./pages/Ecosystem";
+import SanctionLetterPage from "./pages/SanctionLetter";
+import ConsentLogPage from "./pages/ConsentLog";
+import { WhatsAppToaster } from "./components/WhatsAppToaster";
+import { LangProvider, useLang } from "./i18n";
 
 export default function App() {
   return (
-    <div className="min-h-screen flex flex-col">
-      <TopBar />
-      <main className="flex-1">
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/portfolio" element={<PortfolioPage />} />
-          <Route path="/consent/:gstin" element={<ConsentPage />} />
-          <Route path="/msme/:gstin" element={<HealthCardPage />} />
-        </Routes>
-      </main>
-      <Footer />
-    </div>
+    <LangProvider>
+      <div className="min-h-screen flex flex-col">
+        <TopBar />
+        <main className="flex-1">
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/portfolio" element={<PortfolioPage />} />
+            <Route path="/impact" element={<ImpactPage />} />
+            <Route path="/ecosystem" element={<EcosystemPage />} />
+            <Route path="/consent-log" element={<ConsentLogPage />} />
+            <Route path="/applications/:applicationId" element={<SanctionLetterPage />} />
+            <Route path="/consent/:gstin" element={<ConsentPage />} />
+            <Route path="/msme/:gstin" element={<HealthCardPage />} />
+          </Routes>
+        </main>
+        <Footer />
+        <WhatsAppToaster />
+      </div>
+    </LangProvider>
   );
 }
 
@@ -39,20 +52,51 @@ function TopBar() {
             </div>
           </div>
         </Link>
-        <nav className="flex items-center gap-1 rounded-xl bg-ink-50/70 p-1 text-xs">
-          <TabLink to="/" label="Onboarding" end />
-          <TabLink to="/portfolio" label="Portfolio" />
-        </nav>
+        <NavBar />
+        <div className="flex-1" />
         <div className="flex items-center gap-3 text-xs text-ink-500">
+          <LangSwitch />
           {showBack && (
             <Link to="/portfolio" className="btn-ghost !py-1 !px-2 text-xs">
               ← Portfolio
             </Link>
           )}
-          <span className="hidden md:inline">Demo · Track 03</span>
         </div>
       </div>
     </header>
+  );
+}
+
+function NavBar() {
+  const { t } = useLang();
+  return (
+    <nav className="flex items-center gap-1 rounded-xl bg-ink-50/70 p-1 text-xs">
+      <TabLink to="/" label={t("Onboarding")} end />
+      <TabLink to="/portfolio" label={t("Portfolio")} />
+      <TabLink to="/impact" label={t("Impact")} />
+      <TabLink to="/ecosystem" label={t("ULI/OCEN")} />
+      <TabLink to="/consent-log" label={t("Consent log")} />
+    </nav>
+  );
+}
+
+function LangSwitch() {
+  const { lang, setLang } = useLang();
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-ink-200 bg-white p-0.5 text-[11px]">
+      {(["en", "hi"] as const).map((k) => (
+        <button
+          key={k}
+          onClick={() => setLang(k)}
+          className={clsx(
+            "px-2 py-0.5 rounded-md transition",
+            lang === k ? "bg-brand-600 text-white" : "text-ink-500 hover:text-ink-800",
+          )}
+        >
+          {k === "en" ? "EN" : "हिं"}
+        </button>
+      ))}
+    </div>
   );
 }
 
