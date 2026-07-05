@@ -13,11 +13,13 @@ import type {
   UliPullResponse,
 } from "./types";
 
-const BASE = import.meta.env.VITE_API_URL || "/api";
+// Trim a trailing slash so `VITE_API_URL=https://backend.onrender.com/api/`
+// doesn't produce a double slash when concatenated with `/msme` etc.
+const BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json" },
     ...init,
   });
   if (!res.ok) {

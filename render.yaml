@@ -1,0 +1,49 @@
+# Render Blueprint — defines both services so a fresh deploy is reproducible.
+# Deploy via: Render dashboard → New → Blueprint → point at this repo.
+#
+# Two known deploy gotchas this file solves:
+#   1. The backend MUST bind to 0.0.0.0:$PORT (Render assigns a random port at
+#      runtime) — hardcoding --host 127.0.0.1 --port 8000 (the local dev
+#      command) makes the service unreachable.
+#   2. The frontend is a static SPA — without an SPA rewrite rule, direct
+#      links / refreshes on routes like /portfolio or /msme/{gstin} 404,
+#      because there's no /portfolio file on disk, only index.html + JS
+#      routing. The `routes` rewrite below fixes that.
+#
+# After the first deploy, confirm the backend's actual public URL (Render
+# may append a suffix if "idbi-backend" is already taken) and update
+# VITE_API_URL below to match, then redeploy the frontend — Vite bakes env
+# vars in at BUILD time, so a redeploy (not just a restart) is required.
+
+services:
+  - type: web
+    name: idbi-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  - type: web
+    name: idbi-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      # Must include the /api suffix — the frontend appends paths like
+      # /msme, /portfolio directly onto this. Update if Render assigns
+      # idbi-backend a different subdomain than expected.
+      - key: VITE_API_URL
+        value: https://idbi-backend.onrender.com/api
+    routes:
+      # SPA fallback: any path not matching a static file serves index.html
+      # so React Router can handle client-side routes.
+      - type: rewrite
+        source: /*
+        destination: /index.html
