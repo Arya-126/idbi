@@ -31,16 +31,17 @@ services:
   - type: web
     name: idbi-frontend
     runtime: static
-    plan: free
+    # Static sites have no compute plan on Render — bandwidth-billed only.
+    # `plan:` is only valid on compute services (the python service above).
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
       # Must include the /api suffix — the frontend appends paths like
-      # /msme, /portfolio directly onto this. Update if Render assigns
-      # idbi-backend a different subdomain than expected.
+      # /msme, /portfolio directly onto this. Update to match your actual
+      # backend URL from the Render dashboard.
       - key: VITE_API_URL
-        value: https://msme-backend-un24.onrender.com
+        value: https://msme-backend-un24.onrender.com/api
     routes:
       # SPA fallback: any path not matching a static file serves index.html
       # so React Router can handle client-side routes.
