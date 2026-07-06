@@ -12,6 +12,7 @@ from typing import Protocol
 
 from ..schemas import (
     AaProfile,
+    BureauSummary,
     EnterpriseIdentity,
     EpfoProfile,
     GstProfile,
@@ -45,6 +46,14 @@ class UpiConnector(Protocol):
     def fetch(self, gstin: str) -> UpiProfile: ...
 
 
+class BureauConnector(Protocol):
+    """Bureau-if-available. Display-only context — the scorecard never reads
+    it (the pitch is scoring the bureau-less). A real adapter would call
+    CIBIL/Experian/Equifax/CRIF behind this same seam."""
+
+    def fetch(self, pan: str, gstin: str) -> BureauSummary: ...
+
+
 @dataclass
 class ConnectorSet:
     """The full rail bundle the scoring engine depends on.
@@ -58,3 +67,4 @@ class ConnectorSet:
     aa: AaConnector
     epfo: EpfoConnector
     upi: UpiConnector
+    bureau: BureauConnector

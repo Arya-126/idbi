@@ -14,10 +14,21 @@ deliberate departure from a strict consent-first flow.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from uuid import uuid4
 
 from .schemas import ConsentGrant, ConsentSource
+
+
+# ReBIT-style FI type tags per consent source (real values differ; these are
+# recognizably shaped for the demo).
+_FI_TYPES: dict[ConsentSource, str] = {
+    ConsentSource.GST: "GSTR1_3B",
+    ConsentSource.AA: "DEPOSIT",
+    ConsentSource.EPFO: "EPF_PASSBOOK",
+    ConsentSource.UPI: "UPI_TXN_SUMMARY",
+}
 
 
 class ConsentError(Exception):
@@ -35,14 +46,26 @@ def issue(gstin: str, sources: list[ConsentSource], ttl_days: int = 30) -> Conse
     skips the approval wait but keeps the artefact and its lifecycle.
     """
     granted = datetime.utcnow()
+    srcs = sources or list(ConsentSource)
     grant = ConsentGrant(
         consent_id=f"CH-{uuid4().hex[:12].upper()}",
         gstin=gstin,
-        sources=sources or list(ConsentSource),
+        sources=srcs,
         granted_at=granted,
         expires_at=granted + timedelta(days=ttl_days),
         status="GRANTED",
+        fi_types=[_FI_TYPES[s] for s in srcs],
     )
+    # SIMULATED signature: content hash over the canonical artefact fields.
+    # A real AA artefact carries a detached JWS from the aggregator.
+    payload = (
+        f"{grant.consent_id}|{grant.gstin}|{sorted(s.value for s in srcs)}|"
+        f"{grant.granted_at.isoformat()}|{grant.expires_at.isoformat()}|"
+        f"{grant.purpose_code}|{grant.fetch_type}|{grant.data_life_days}"
+    )
+    grant = grant.model_copy(update={
+        "artefact_signature": "sim-sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:32],
+    })
     _by_id[grant.consent_id] = grant
     _latest_by_gstin[gstin] = grant
     return grant

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..schemas import DataPack, DimensionScore, Factor, FactorKind
+from ..schemas import DimensionScore, Factor, FactorKind
 from .features import Features, fmt_paise_short, fmt_pct, L_PAISE
 
 
@@ -25,6 +25,36 @@ WEIGHTS: dict[str, float] = {
     "compliance": 0.15,
     "employment": 0.12,
     "obligation_leverage": 0.16,
+}
+
+
+# Stable adverse-action-style reason codes, keyed by (dimension, factor name).
+# Codes never change meaning across releases — a decline traced to CF-02 today
+# must mean "bounce incidents" forever. New factors get new codes.
+REASON_CODES: dict[tuple[str, str], str] = {
+    ("revenue_health", "Turnover scale"): "RV-01",
+    ("revenue_health", "Growth trajectory"): "RV-02",
+    ("revenue_health", "Revenue consistency"): "RV-03",
+    ("cash_flow", "Inflow/outflow ratio"): "CF-01",
+    ("cash_flow", "Bounces / returns"): "CF-02",
+    ("cash_flow", "Balance buffer"): "CF-03",
+    ("cash_flow", "Minimum-balance floor"): "CF-04",
+    ("digital_vitality", "UPI volume"): "DV-01",
+    ("digital_vitality", "Customer breadth"): "DV-02",
+    ("digital_vitality", "Digital adoption trend"): "DV-03",
+    ("digital_vitality", "Merchant-payment mix"): "DV-04",
+    ("compliance", "GST filing timeliness"): "CD-01",
+    ("compliance", "Filing delay severity"): "CD-02",
+    ("compliance", "EPFO deposit discipline"): "CD-03",
+    ("compliance", "EPFO coverage"): "CD-04",
+    ("employment", "EPFO coverage"): "ES-01",
+    ("employment", "Employment signal"): "ES-02",
+    ("employment", "Headcount trend"): "ES-03",
+    ("employment", "Salary regularity"): "ES-04",
+    ("obligation_leverage", "Existing debt burden"): "OB-01",
+    ("obligation_leverage", "Repayment track record"): "OB-02",
+    ("obligation_leverage", "EMI-to-turnover"): "OB-03",
+    ("obligation_leverage", "Debt-service coverage"): "OB-04",
 }
 
 
@@ -49,6 +79,8 @@ def _mk(
     trend: str,
     summary: str,
 ) -> DimensionScore:
+    for f in factors:
+        f.code = REASON_CODES.get((key, f.name), "")
     base = 50 + sum(f.contribution for f in factors)
     return DimensionScore(
         key=key,
@@ -231,6 +263,29 @@ def score_cash_flow(f: Features) -> DimensionScore:
             contribution=-10, kind=FactorKind.RISK,
         ))
 
+    # Worst-dip resilience: the lowest balance touched in 12 months as a share
+    # of monthly outflow. A floor near zero means every shock lands on credit.
+    if f.monthly_outflow_paise > 0:
+        floor_ratio = f.min_balance_paise / f.monthly_outflow_paise
+        if floor_ratio >= 0.5:
+            factors.append(Factor(
+                name="Minimum-balance floor",
+                detail=f"Worst dip still held ~{floor_ratio:.1f} months of expenses",
+                contribution=8, kind=FactorKind.STRENGTH,
+            ))
+        elif floor_ratio >= 0.1:
+            factors.append(Factor(
+                name="Minimum-balance floor",
+                detail=f"Worst 12m dip = ~{floor_ratio:.1f} months of expenses",
+                contribution=0, kind=FactorKind.NEUTRAL,
+            ))
+        else:
+            factors.append(Factor(
+                name="Minimum-balance floor",
+                detail="Balance dipped to near zero at least once in 12 months",
+                contribution=-8, kind=FactorKind.RISK,
+            ))
+
     # Trend from the balance trajectory over the 12-month window, not the
     # current ratio level.
     trend = _trend(f.balance_trend_pct, up_th=0.10, down_th=-0.10)
@@ -297,6 +352,28 @@ def score_digital_vitality(f: Features) -> DimensionScore:
             detail=f"Only {f.upi_unique_payers} unique payers/mo — concentration risk",
             contribution=-10, kind=FactorKind.RISK,
         ))
+
+    # P2M share: customer→merchant payments are genuine sales; a low share
+    # means the "inflow" may be self-transfers or P2P noise, not revenue.
+    if f.upi_monthly_inflow_paise > 0:
+        if f.upi_p2m_share >= 0.75:
+            factors.append(Factor(
+                name="Merchant-payment mix",
+                detail=f"{f.upi_p2m_share:.0%} of receipts are customer→merchant — genuine sales",
+                contribution=6, kind=FactorKind.STRENGTH,
+            ))
+        elif f.upi_p2m_share >= 0.40:
+            factors.append(Factor(
+                name="Merchant-payment mix",
+                detail=f"{f.upi_p2m_share:.0%} merchant-payment share of UPI receipts",
+                contribution=2, kind=FactorKind.NEUTRAL,
+            ))
+        else:
+            factors.append(Factor(
+                name="Merchant-payment mix",
+                detail=f"Only {f.upi_p2m_share:.0%} merchant payments — inflow may be transfers, not sales",
+                contribution=-4, kind=FactorKind.RISK,
+            ))
 
     if f.upi_growth_pct is not None:
         if f.upi_growth_pct > 0.20:
