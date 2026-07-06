@@ -121,9 +121,9 @@ export default function PortfolioPage() {
         />
         <Kpi
           label="ML disagrees"
-          value={`${data.ml_divergent_count}`}
+          value={`${data.ml_divergent_count ?? 0}`}
           sub="champion/challenger queue"
-          tone={data.ml_divergent_count > 0 ? "warn" : "good"}
+          tone={(data.ml_divergent_count ?? 0) > 0 ? "warn" : "good"}
         />
       </section>
 
@@ -150,8 +150,8 @@ export default function PortfolioPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
-        <GuardrailsPanel c={data.concentration} />
-        <VintagePanel cohorts={data.vintage_cohorts} />
+        <GuardrailsPanel c={data.concentration ?? null} />
+        <VintagePanel cohorts={data.vintage_cohorts ?? []} />
       </section>
 
       <StressPanel />
@@ -170,7 +170,7 @@ export default function PortfolioPage() {
                 ["all", "All"],
                 ["watch", `Watch-list (${data.watchlist_count})`],
                 ["ntc", `NTC/NTB (${ntcNtbTotal})`],
-                ["divergent", `ML disagrees (${data.ml_divergent_count})`],
+                ["divergent", `ML disagrees (${data.ml_divergent_count ?? 0})`],
                 ["demo", "Demo personas"],
               ] as const
             ).map(([k, label]) => (

@@ -85,10 +85,23 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _warm_caches() -> None:
-    """Train the PD model and build the portfolio at boot so first requests are fast."""
-    from .ml import get_model
-    get_model()          # trains ~500 samples in <1s
-    build_portfolio()    # scores 30 MSMEs and caches summary
+    """Warm the PD model and portfolio cache in the background.
+
+    Warmup must NOT block the port from opening: on Render a deploy is
+    marked failed if the port doesn't bind quickly, and a cold model train
+    (500 data packs through the production pipeline) plus a 30-firm book
+    build takes tens of seconds on a free-tier CPU. Requests that arrive
+    before warmup finishes simply pay the cost themselves — get_model()
+    and build_portfolio() are lock-guarded and idempotent.
+    """
+    import threading
+
+    def warm() -> None:
+        from .ml import get_model
+        get_model()
+        build_portfolio()
+
+    threading.Thread(target=warm, daemon=True, name="warmup").start()
 
 
 @app.get("/health")

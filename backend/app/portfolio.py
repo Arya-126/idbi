@@ -21,6 +21,7 @@ invalidates and rebuilds it.
 from __future__ import annotations
 
 import random
+import threading
 from collections import Counter
 from datetime import date, datetime
 
@@ -239,11 +240,23 @@ def _buckets(counts: Counter, total: int, labels: dict[str, str] | None = None) 
     return out
 
 
+_build_lock = threading.Lock()
+
+
 def build_portfolio() -> PortfolioSummary:
-    """Build (once) and cache the portfolio summary."""
+    """Build (once) and cache the portfolio summary. Lock-guarded so the
+    background warmup and an early request don't build the book twice."""
     global _summary
     if _summary is not None:
         return _summary
+    with _build_lock:
+        if _summary is not None:
+            return _summary
+        return _build_portfolio_locked()
+
+
+def _build_portfolio_locked() -> PortfolioSummary:
+    global _summary
 
     sampled = _register_sampled_personas(PORTFOLIO_SIZE, PORTFOLIO_SEED)
 
