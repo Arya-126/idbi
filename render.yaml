@@ -41,7 +41,7 @@ services:
       # /msme, /portfolio directly onto this. Update to match your actual
       # backend URL from the Render dashboard.
       - key: VITE_API_URL
-        value: https://msme-backend-un24.onrender.com/api
+        value: https://idbi-backend.onrender.com/api
     routes:
       # SPA fallback: any path not matching a static file serves index.html
       # so React Router can handle client-side routes.
