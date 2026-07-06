@@ -8,7 +8,6 @@ ones without touching downstream logic.
 
 from __future__ import annotations
 
-import math
 import statistics
 from dataclasses import dataclass
 

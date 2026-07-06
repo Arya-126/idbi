@@ -8,7 +8,9 @@ import ImpactPage from "./pages/Impact";
 import EcosystemPage from "./pages/Ecosystem";
 import SanctionLetterPage from "./pages/SanctionLetter";
 import ConsentLogPage from "./pages/ConsentLog";
+import CompliancePage from "./pages/Compliance";
 import { WhatsAppToaster } from "./components/WhatsAppToaster";
+import DemoGuide from "./components/DemoGuide";
 
 export default function App() {
   return (
@@ -21,6 +23,7 @@ export default function App() {
           <Route path="/impact" element={<ImpactPage />} />
           <Route path="/ecosystem" element={<EcosystemPage />} />
           <Route path="/consent-log" element={<ConsentLogPage />} />
+          <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/applications/:applicationId" element={<SanctionLetterPage />} />
           <Route path="/consent/:gstin" element={<ConsentPage />} />
           <Route path="/msme/:gstin" element={<HealthCardPage />} />
@@ -28,6 +31,7 @@ export default function App() {
       </main>
       <Footer />
       <WhatsAppToaster />
+      <DemoGuide />
     </div>
   );
 }
@@ -55,6 +59,7 @@ function TopBar() {
           <TabLink to="/impact" label="Impact" />
           <TabLink to="/ecosystem" label="ULI/OCEN" />
           <TabLink to="/consent-log" label="Consent log" />
+          <TabLink to="/compliance" label="Compliance" />
         </nav>
         <div className="flex-1" />
         <div className="flex items-center gap-3 text-xs text-ink-500">

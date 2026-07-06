@@ -1,4 +1,4 @@
-import type { ImprovementRecommendation } from "../types";
+import type { ImprovementRecommendation, PathToNextBand } from "../types";
 
 const DIM_LABEL: Record<string, string> = {
   revenue_health: "Revenue",
@@ -20,8 +20,10 @@ const DIM_TINT: Record<string, string> = {
 
 export default function RecommendationsPanel({
   items,
+  path,
 }: {
   items: ImprovementRecommendation[];
+  path?: PathToNextBand | null;
 }) {
   if (items.length === 0) {
     return null;
@@ -33,9 +35,41 @@ export default function RecommendationsPanel({
           Improve your score
         </h2>
         <span className="text-[11px] text-ink-500">
-          Actions ranked by potential score uplift
+          Uplifts computed by re-running your scorecard, not estimates
         </span>
       </div>
+
+      {path && (
+        <div
+          className={
+            "mt-4 rounded-xl border p-4 " +
+            (path.achievable
+              ? "border-brand-200 bg-brand-50/60"
+              : "border-amber-200 bg-amber-50/60")
+          }
+        >
+          <div className="text-xs font-semibold text-ink-900">
+            {path.achievable
+              ? `Path to Band ${path.target_band} — within reach`
+              : `Toward Band ${path.target_band} — these actions close most of the gap`}
+          </div>
+          <div className="mt-1 text-xs text-ink-700">
+            {path.actions.length === 1 ? (
+              <>1 action</>
+            ) : (
+              <>{path.actions.length} actions</>
+            )}{" "}
+            → projected score{" "}
+            <span className="font-mono font-semibold">{path.projected_score}</span>{" "}
+            (+{path.uplift_pts} pts), roughly {path.time_horizon_months} months:
+          </div>
+          <ol className="mt-2 list-decimal list-inside space-y-0.5 text-xs text-ink-700">
+            {path.actions.map((a) => (
+              <li key={a}>{a}</li>
+            ))}
+          </ol>
+        </div>
+      )}
       <ul className="mt-4 space-y-3">
         {items.map((r, i) => (
           <li key={i} className="border-l-2 border-brand-400 pl-4 pr-2 py-1">

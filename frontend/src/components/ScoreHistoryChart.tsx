@@ -35,6 +35,7 @@ export default function ScoreHistoryChart({
     period: p.period.slice(2), // "YY-MM"
     score: p.composite_score,
     band: p.risk_band,
+    observed: p.observed,
   }));
 
   const first = points[0].composite_score;
@@ -91,7 +92,25 @@ export default function ScoreHistoryChart({
               dataKey="score"
               stroke="#046046"
               strokeWidth={2}
-              dot={{ r: 3, fill: "#046046" }}
+              // Observed points (real recorded runs) render solid; the
+              // reconstructed approximation renders hollow.
+              dot={(props: { cx?: number; cy?: number; payload?: { observed?: boolean }; index?: number }) => {
+                const { cx, cy, payload, index } = props;
+                if (cx == null || cy == null) return <g key={index} />;
+                return payload?.observed ? (
+                  <circle key={index} cx={cx} cy={cy} r={4} fill="#046046" />
+                ) : (
+                  <circle
+                    key={index}
+                    cx={cx}
+                    cy={cy}
+                    r={3}
+                    fill="#ffffff"
+                    stroke="#046046"
+                    strokeWidth={1.5}
+                  />
+                );
+              }}
             />
             <Tooltip
               content={({ payload }) => {
@@ -104,6 +123,11 @@ export default function ScoreHistoryChart({
                     </div>
                     <div className="text-ink-600">
                       Composite {p.score} · Band {p.band}
+                    </div>
+                    <div className="text-[10px] text-ink-400">
+                      {p.observed
+                        ? "observed — recorded scoring run"
+                        : "reconstructed from windowed re-scoring"}
                     </div>
                   </div>
                 );

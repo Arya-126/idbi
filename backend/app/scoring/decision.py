@@ -9,11 +9,21 @@ gates on the underlying features (bounces, DSCR).
 from __future__ import annotations
 
 from ..schemas import Decision, DimensionScore, LimitStep
-from .features import Features, fmt_paise_short, L_PAISE
+from .features import Features, fmt_paise_short
 
 
 def compute_composite(dimensions: list[DimensionScore]) -> int:
-    weighted = sum(d.score * d.weight for d in dimensions)
+    """Weighted sum over the consented dimensions, renormalized to 0-1000.
+
+    When a source is withheld its dimension carries consented=False and is
+    excluded; the remaining weights are rescaled so the composite still spans
+    the full range instead of being silently dragged down by zeros.
+    """
+    scored = [d for d in dimensions if d.consented]
+    if not scored:
+        return 0
+    total_weight = sum(d.weight for d in scored)
+    weighted = sum(d.score * d.weight for d in scored) / total_weight
     return round(weighted * 10)  # → 0-1000
 
 

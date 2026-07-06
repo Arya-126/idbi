@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import random
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime
 
 from .schemas import (
     AaProfile,
@@ -374,12 +374,14 @@ def _yoy_multiplier(months_back: int, yoy_growth: float) -> float:
     return (1.0 + yoy_growth) ** (-months_back / 12.0)
 
 
-def _gen_gst_returns(persona: Persona, rng: random.Random) -> list[GstMonthlyReturn]:
+def _gen_gst_returns(
+    persona: Persona, rng: random.Random, anchor: date = TODAY
+) -> list[GstMonthlyReturn]:
     returns: list[GstMonthlyReturn] = []
-    vintage = _months_between(persona.incorporation_date, TODAY)
+    vintage = _months_between(persona.incorporation_date, anchor)
     n_months = min(24, max(1, vintage))
     for i in range(n_months):
-        m_date = _months_ago(TODAY, n_months - i)  # oldest → newest
+        m_date = _months_ago(anchor, n_months - i)  # oldest → newest
         months_back = n_months - i
         mult = _seasonality(
             m_date.month, persona.seasonality_peak_month, persona.seasonality_amplitude
@@ -403,17 +405,19 @@ def _gen_gst_returns(persona: Persona, rng: random.Random) -> list[GstMonthlyRet
     return returns
 
 
-def _gen_bank_account(persona: Persona, rng: random.Random) -> BankAccount:
+def _gen_bank_account(
+    persona: Persona, rng: random.Random, anchor: date = TODAY
+) -> BankAccount:
     balance = int(persona.avg_bank_balance_lakhs * L_PAISE)
     account_id = f"ACC{rng.randint(10**9, 10**10 - 1)}"
     ifsc = f"{persona.ifsc_prefix}{rng.randint(100000, 999999):06d}"
 
     txns: list[BankTxn] = []
     bounce_budget = persona.bounce_incidents_12m
-    n_months = min(12, max(1, _months_between(persona.incorporation_date, TODAY)))
+    n_months = min(12, max(1, _months_between(persona.incorporation_date, anchor)))
 
     for month_back in range(n_months, 0, -1):  # oldest first
-        m_date = _months_ago(TODAY, month_back)
+        m_date = _months_ago(anchor, month_back)
         seasonal = _seasonality(
             m_date.month, persona.seasonality_peak_month, persona.seasonality_amplitude
         ) * _yoy_multiplier(month_back, persona.growth_yoy)
@@ -547,7 +551,7 @@ def _gen_bank_account(persona: Persona, rng: random.Random) -> BankAccount:
                     date=date(m_date.year, m_date.month, rng.randint(1, 28)),
                     amount_paise=-amt,
                     mode="CHEQUE",
-                    narration=f"CHQ RETURN CHARGES/INSUF FUNDS",
+                    narration="CHQ RETURN CHARGES/INSUF FUNDS",
                     balance_paise=balance,
                     category=BankTxnCategory.OTHER,
                 )
@@ -566,7 +570,7 @@ def _gen_bank_account(persona: Persona, rng: random.Random) -> BankAccount:
         ifsc=ifsc,
         account_type=account_type,
         current_balance_paise=balance,
-        as_of=TODAY,
+        as_of=anchor,
         transactions=txns,
         bounce_incidents=persona.bounce_incidents_12m,
     )
@@ -584,7 +588,9 @@ def _split(total: float, n: int, rng: random.Random) -> list[float]:
     return shares
 
 
-def _gen_epfo(persona: Persona, rng: random.Random) -> EpfoProfile:
+def _gen_epfo(
+    persona: Persona, rng: random.Random, anchor: date = TODAY
+) -> EpfoProfile:
     if not persona.epfo_active:
         return EpfoProfile(
             establishment_id=f"MHBAN{rng.randint(1000000, 9999999)}",
@@ -594,9 +600,9 @@ def _gen_epfo(persona: Persona, rng: random.Random) -> EpfoProfile:
 
     monthly: list[EpfoMonth] = []
     base_count = persona.employee_count
-    n_months = min(12, max(1, _months_between(persona.incorporation_date, TODAY)))
+    n_months = min(12, max(1, _months_between(persona.incorporation_date, anchor)))
     for month_back in range(n_months, 0, -1):
-        m_date = _months_ago(TODAY, month_back)
+        m_date = _months_ago(anchor, month_back)
         # Employees grow slightly over time (recent > old)
         emp = max(
             1,
@@ -623,11 +629,13 @@ def _gen_epfo(persona: Persona, rng: random.Random) -> EpfoProfile:
     )
 
 
-def _gen_upi(persona: Persona, rng: random.Random) -> UpiProfile:
+def _gen_upi(
+    persona: Persona, rng: random.Random, anchor: date = TODAY
+) -> UpiProfile:
     monthly: list[UpiMonth] = []
-    n_months = min(12, max(1, _months_between(persona.incorporation_date, TODAY)))
+    n_months = min(12, max(1, _months_between(persona.incorporation_date, anchor)))
     for month_back in range(n_months, 0, -1):
-        m_date = _months_ago(TODAY, month_back)
+        m_date = _months_ago(anchor, month_back)
         seasonal = _seasonality(
             m_date.month, persona.seasonality_peak_month, persona.seasonality_amplitude
         ) * _yoy_multiplier(month_back, persona.upi_growth_yoy)
@@ -651,25 +659,35 @@ def _gen_upi(persona: Persona, rng: random.Random) -> UpiProfile:
     return UpiProfile(vpa=vpa, monthly=monthly)
 
 
-def build_data_pack(gstin: str) -> DataPack | None:
+def build_data_pack(gstin: str, as_of: date | None = None) -> DataPack | None:
+    """Generate the full synthetic pack, anchored at `as_of` (default today).
+
+    A non-default `as_of` simulates a *fresh consented pull on a later date*:
+    the anchor month shifts and the seed mixes in the anchor, so the data
+    plausibly evolves (same persona behaviour knobs, new realization). Used
+    by the "simulate next month" demo control — real rails obviously don't
+    take an as_of.
+    """
     persona = get_persona(gstin)
     if not persona:
         return None
-    rng = random.Random(_seed(gstin))
+    anchor = as_of or TODAY
+    seed_key = gstin if anchor == TODAY else f"{gstin}|{anchor.isoformat()[:7]}"
+    rng = random.Random(_seed(seed_key))
     identity = identity_for(persona)
     gst = GstProfile(
         gstin=persona.gstin,
         registration_date=persona.incorporation_date,
         filing_status="ACTIVE",
-        returns=_gen_gst_returns(persona, rng),
+        returns=_gen_gst_returns(persona, rng, anchor),
     )
-    account = _gen_bank_account(persona, rng)
+    account = _gen_bank_account(persona, rng, anchor)
     aa = AaProfile(
         consent_handle=f"CH-{rng.randint(10**11, 10**12 - 1)}",
         linked_accounts=[account],
     )
-    epfo = _gen_epfo(persona, rng)
-    upi = _gen_upi(persona, rng)
+    epfo = _gen_epfo(persona, rng, anchor)
+    upi = _gen_upi(persona, rng, anchor)
 
     return DataPack(
         identity=identity,
@@ -677,5 +695,5 @@ def build_data_pack(gstin: str) -> DataPack | None:
         aa=aa,
         epfo=epfo,
         upi=upi,
-        fetched_at=datetime.combine(TODAY, datetime.min.time()),
+        fetched_at=datetime.combine(anchor, datetime.min.time()),
     )

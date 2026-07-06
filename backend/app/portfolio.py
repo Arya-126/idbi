@@ -22,15 +22,18 @@ from __future__ import annotations
 
 import random
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime
 
 from . import personas
 from .ml_data import sample_persona
 from .personas import Persona
 from .schemas import (
+    ConcentrationSummary,
     PortfolioBucket,
     PortfolioEntry,
     PortfolioSummary,
+    SectorExposure,
+    VintageCohort,
 )
 from .scoring.engine import score_gstin
 
@@ -110,6 +113,13 @@ def _build_entry(p: Persona) -> PortfolioEntry:
 
     demo_gstins = {p.gstin for p in personas.PERSONAS[:5]}
 
+    today = date.today()
+    vintage_months = max(
+        0,
+        (today.year - p.incorporation_date.year) * 12
+        + (today.month - p.incorporation_date.month),
+    )
+
     return PortfolioEntry(
         gstin=p.gstin,
         trade_name=p.trade_name,
@@ -130,7 +140,91 @@ def _build_entry(p: Persona) -> PortfolioEntry:
         watchlist_reason=" · ".join(reasons) if reasons else None,
         trend=trend,  # type: ignore[arg-type]
         ews_flags=ews_flags[:3],
+        ml_divergent=not card.ml_assessment.agrees_with_rulebook,
+        vintage_months=vintage_months,
     )
+
+
+def _concentration(entries: list[PortfolioEntry]) -> ConcentrationSummary | None:
+    """Diversification guardrails over the live (APPROVE/REFER) exposure."""
+    live = [e for e in entries if e.recommendation in ("APPROVE", "REFER")
+            and e.suggested_limit_paise > 0]
+    total = sum(e.suggested_limit_paise for e in live)
+    if total == 0:
+        return None
+
+    by_sector: dict[str, int] = {}
+    for e in live:
+        by_sector[e.sector] = by_sector.get(e.sector, 0) + e.suggested_limit_paise
+
+    sector_cap = 0.25
+    single_cap = 0.10
+    exposures = sorted(
+        (
+            SectorExposure(
+                sector=s,
+                exposure_paise=v,
+                share=v / total,
+                breach=v / total > sector_cap,
+            )
+            for s, v in by_sector.items()
+        ),
+        key=lambda x: -x.exposure_paise,
+    )
+    hhi = sum(x.share ** 2 for x in exposures)
+    biggest = max(live, key=lambda e: e.suggested_limit_paise)
+    single_share = biggest.suggested_limit_paise / total
+
+    breaches = [
+        f"{x.sector} at {x.share:.0%} of exposure (cap {sector_cap:.0%})"
+        for x in exposures if x.breach
+    ]
+    if single_share > single_cap:
+        breaches.append(
+            f"{biggest.trade_name} alone is {single_share:.0%} of exposure "
+            f"(cap {single_cap:.0%})"
+        )
+
+    return ConcentrationSummary(
+        hhi=round(hhi, 3),
+        top_sector=exposures[0].sector,
+        top_sector_share=round(exposures[0].share, 3),
+        single_name_max=biggest.trade_name,
+        single_name_max_share=round(single_share, 3),
+        sector_exposures=exposures,
+        breaches=breaches,
+    )
+
+
+_COHORTS: list[tuple[str, str, int, int]] = [
+    ("lt1y", "< 1 year", 0, 12),
+    ("1to3y", "1–3 years", 12, 36),
+    ("3to5y", "3–5 years", 36, 60),
+    ("gt5y", "5+ years", 60, 10_000),
+]
+
+
+def _vintage_cohorts(entries: list[PortfolioEntry]) -> list[VintageCohort]:
+    """Score/approval/PD by firm age — proves young (credit-invisible) firms
+    are scoreable, and shows how quality varies by vintage."""
+    out: list[VintageCohort] = []
+    for key, label, lo, hi in _COHORTS:
+        members = [e for e in entries if lo <= e.vintage_months < hi]
+        if not members:
+            continue
+        out.append(VintageCohort(
+            key=key,
+            label=label,
+            count=len(members),
+            avg_score=round(sum(e.composite_score for e in members) / len(members), 1),
+            approval_rate=round(
+                sum(1 for e in members if e.recommendation == "APPROVE") / len(members), 3,
+            ),
+            avg_pd=round(
+                sum(e.probability_of_default for e in members) / len(members), 4,
+            ),
+        ))
+    return out
 
 
 def _buckets(counts: Counter, total: int, labels: dict[str, str] | None = None) -> list[PortfolioBucket]:
@@ -181,6 +275,9 @@ def build_portfolio() -> PortfolioSummary:
         total_exposure_paise=total_exposure,
         ntc_ntb_count=ntc_ntb,
         watchlist_count=sum(1 for e in entries if e.is_watchlist),
+        ml_divergent_count=sum(1 for e in entries if e.ml_divergent),
+        concentration=_concentration(entries),
+        vintage_cohorts=_vintage_cohorts(entries),
         band_distribution=_buckets(
             band_counts, total,
             labels={"A": "A · Prime", "B": "B · Standard",
