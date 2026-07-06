@@ -437,12 +437,20 @@ def _fmt_feature_value(key: str, val: float) -> str:
 
 # ─── Singleton wiring ───────────────────────────────────────────────────────
 
+import threading
+
 _MODEL: PdModel | None = None
+_MODEL_LOCK = threading.Lock()
 
 
 def get_model() -> PdModel:
+    """Lazily train (or load) the singleton model. Lock-guarded so the
+    background warmup thread and an early request can't double-train."""
     global _MODEL
     if _MODEL is None:
-        _MODEL = PdModel()
-        _MODEL.train()
+        with _MODEL_LOCK:
+            if _MODEL is None:
+                model = PdModel()
+                model.train()
+                _MODEL = model
     return _MODEL

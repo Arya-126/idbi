@@ -106,7 +106,7 @@ export default function MlPanel({ ml }: { ml: MlAssessment }) {
           ` · holdout AUC ${ml.holdout_auc.toFixed(2)}`}
         {ml.holdout_brier != null &&
           ` · Brier ${ml.holdout_brier.toFixed(3)}`}
-        {` · ${ml.calibration}-calibrated`}
+        {ml.calibration ? ` · ${ml.calibration}-calibrated` : ""}
       </div>
     </section>
   );

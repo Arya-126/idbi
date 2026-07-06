@@ -75,7 +75,7 @@ export default function ImpactPage() {
         ))}
       </section>
 
-      {data.inclusion.length > 0 && (
+      {(data.inclusion?.length ?? 0) > 0 && (
         <section className="card p-5">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="text-sm font-semibold text-ink-900">

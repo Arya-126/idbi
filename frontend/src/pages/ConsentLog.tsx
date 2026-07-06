@@ -14,7 +14,9 @@ export default function ConsentLogPage() {
 
   function refresh() {
     api.consentLog().then(setEntries).catch((e) => setError(String(e)));
-    api.auditLog().then(setAccesses).catch((e) => setError(String(e)));
+    // Older backends have no /audit/log — degrade to an empty tab, don't
+    // block the grants view.
+    api.auditLog().then(setAccesses).catch(() => setAccesses([]));
   }
 
   useEffect(refresh, []);

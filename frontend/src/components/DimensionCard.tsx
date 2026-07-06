@@ -3,13 +3,16 @@ import type { DimensionScore } from "../types";
 import { factorKindColor, trendColor, trendGlyph } from "../utils/format";
 
 export default function DimensionCard({ dim }: { dim: DimensionScore }) {
+  // Strict === false: an older backend without the field must not grey out
+  // every dimension.
+  const withheld = dim.consented === false;
   return (
-    <div className={clsx("card p-5", !dim.consented && "opacity-60 bg-ink-50/50")}>
+    <div className={clsx("card p-5", withheld && "opacity-60 bg-ink-50/50")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold text-ink-900">{dim.label}</div>
-            {!dim.consented && (
+            {withheld && (
               <span
                 className="pill bg-ink-100 text-ink-500 border border-ink-200 text-[9px]"
                 title="Borrower did not share this data source — dimension excluded, remaining weights renormalized"
@@ -24,7 +27,7 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
         </div>
         <div className="text-right">
           <div className="text-2xl font-display font-semibold text-ink-900 leading-none">
-            {dim.consented ? dim.score : "—"}
+            {withheld ? "—" : dim.score}
             <span className="text-xs font-normal text-ink-500 ml-1">/100</span>
           </div>
           <div className="text-[10px] uppercase tracking-wider text-ink-500 mt-1">
