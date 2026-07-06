@@ -33,6 +33,7 @@ Design choices:
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -436,8 +437,6 @@ def _fmt_feature_value(key: str, val: float) -> str:
 
 
 # ─── Singleton wiring ───────────────────────────────────────────────────────
-
-import threading
 
 _MODEL: PdModel | None = None
 _MODEL_LOCK = threading.Lock()
