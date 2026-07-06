@@ -4,17 +4,27 @@ import { factorKindColor, trendColor, trendGlyph } from "../utils/format";
 
 export default function DimensionCard({ dim }: { dim: DimensionScore }) {
   return (
-    <div className="card p-5">
+    <div className={clsx("card p-5", !dim.consented && "opacity-60 bg-ink-50/50")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-ink-900">{dim.label}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold text-ink-900">{dim.label}</div>
+            {!dim.consented && (
+              <span
+                className="pill bg-ink-100 text-ink-500 border border-ink-200 text-[9px]"
+                title="Borrower did not share this data source — dimension excluded, remaining weights renormalized"
+              >
+                not shared
+              </span>
+            )}
+          </div>
           <div className="text-xs text-ink-500 mt-0.5 leading-snug">
             {dim.summary}
           </div>
         </div>
         <div className="text-right">
           <div className="text-2xl font-display font-semibold text-ink-900 leading-none">
-            {dim.score}
+            {dim.consented ? dim.score : "—"}
             <span className="text-xs font-normal text-ink-500 ml-1">/100</span>
           </div>
           <div className="text-[10px] uppercase tracking-wider text-ink-500 mt-1">
@@ -78,6 +88,14 @@ export default function DimensionCard({ dim }: { dim: DimensionScore }) {
             <div className="min-w-0">
               <div className="text-[11px] font-semibold text-ink-900">
                 {f.name}
+                {f.code && (
+                  <span
+                    className="ml-1.5 font-mono font-normal text-[9px] text-ink-400"
+                    title="Stable reason code — every decision traces to coded factors"
+                  >
+                    {f.code}
+                  </span>
+                )}
               </div>
               <div className="text-[11px] text-ink-600 leading-snug">
                 {f.detail}

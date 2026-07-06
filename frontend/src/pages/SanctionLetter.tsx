@@ -130,6 +130,41 @@ export default function SanctionLetterPage() {
             <Cell label="Offer valid until" value={new Date(letter.valid_until).toLocaleDateString("en-IN")} />
           </section>
 
+          {letter.kfs && (
+            <section className="mt-6 rounded-xl border-2 border-brand-200 p-4">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="text-sm font-semibold text-brand-800">
+                  Key Fact Statement
+                </div>
+                <div className="text-[10px] text-ink-500">
+                  per RBI Digital Lending Guidelines, 2022
+                </div>
+              </div>
+              <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+                <Cell label="APR (all-in)" value={`${letter.kfs.apr_pct.toFixed(2)}%`} emphasize />
+                <Cell label="Total interest" value={paiseToInr(letter.kfs.total_interest_paise)} />
+                <Cell label="Processing fee" value={paiseToInr(letter.kfs.processing_fee_paise)} />
+                <Cell
+                  label="Total cost of credit"
+                  value={paiseToInr(letter.kfs.total_cost_of_credit_paise)}
+                  emphasize
+                />
+                <Cell
+                  label="Repayment"
+                  value={`${letter.kfs.number_of_emis} EMIs of ${paiseToInr(letter.kfs.monthly_emi_paise)}`}
+                />
+                <Cell
+                  label="Cooling-off window"
+                  value={`${letter.kfs.cooling_off_days} days — exit without penalty`}
+                />
+              </div>
+              <p className="mt-3 text-[10px] text-ink-500">
+                Grievance officer: {letter.kfs.grievance_officer}.{" "}
+                {letter.kfs.lsp_disclosure}
+              </p>
+            </section>
+          )}
+
           <section className="mt-6">
             <div className="text-[11px] uppercase tracking-wider text-ink-500 mb-2">
               Covenants

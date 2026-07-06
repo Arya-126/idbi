@@ -66,9 +66,73 @@ export default function ImpactPage() {
             >
               {m.lift}
             </div>
+            {m.note && (
+              <p className="mt-1.5 text-[10px] leading-snug text-ink-400">
+                {m.note}
+              </p>
+            )}
           </div>
         ))}
       </section>
+
+      {data.inclusion.length > 0 && (
+        <section className="card p-5">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold text-ink-900">
+              Inclusion dashboard — credit-invisible vs established
+            </h2>
+            <span className="text-[11px] text-ink-500">
+              same book, same metrics, no bureau anywhere
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-ink-500 border-b border-ink-100 bg-ink-50/40">
+                  <th className="px-3 py-2 font-medium">Segment</th>
+                  <th className="px-3 py-2 font-medium text-right">Firms</th>
+                  <th className="px-3 py-2 font-medium text-right">Approval rate</th>
+                  <th className="px-3 py-2 font-medium text-right">Avg score</th>
+                  <th className="px-3 py-2 font-medium text-right">Avg PD</th>
+                  <th className="px-3 py-2 font-medium text-right">Avg limit (approved)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.inclusion.map((s) => (
+                  <tr key={s.key} className="border-b border-ink-100 last:border-b-0">
+                    <td className="px-3 py-2.5 font-medium text-ink-900">
+                      {s.label}
+                      {s.key === "ntc_ntb" && (
+                        <span className="ml-1.5 pill bg-violet-50 text-violet-700 border border-violet-200 text-[9px]">
+                          the target segment
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{s.count}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">
+                      {(s.approval_rate * 100).toFixed(0)}%
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {s.avg_score.toFixed(0)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {(s.avg_pd * 100).toFixed(1)}%
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {s.avg_limit_paise > 0 ? paiseToInr(s.avg_limit_paise) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[11px] text-ink-500">
+            A credit-invisible firm is approvable at comparable quality when the
+            alternate-data signals support it — inclusion without adverse
+            selection.
+          </p>
+        </section>
+      )}
 
       <section className="card p-5">
         <div className="flex items-baseline justify-between mb-3">

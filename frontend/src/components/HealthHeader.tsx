@@ -19,6 +19,25 @@ export default function HealthHeader({ card }: { card: HealthCard }) {
             <span className="pill bg-brand-50 text-brand-700 border border-brand-200">
               {e.msme_category}
             </span>
+            {card.bureau && (
+              <span
+                className={
+                  "pill border " +
+                  (card.bureau.hit
+                    ? "bg-ink-50 text-ink-600 border-ink-200"
+                    : "bg-violet-50 text-violet-700 border-violet-200")
+                }
+                title={
+                  card.bureau.hit
+                    ? `Synthetic bureau file: score ${card.bureau.score}, ${card.bureau.live_tradelines} live tradeline(s). Display-only — the scorecard never reads it.`
+                    : "This is the financial-inclusion proof point: no bureau history exists, yet the firm is fully scoreable from consented alternate data."
+                }
+              >
+                {card.bureau.hit
+                  ? `bureau file exists · not scored`
+                  : "no bureau file · scored on alternate data"}
+              </span>
+            )}
           </div>
           <div className="mt-1 text-sm text-ink-500">
             {e.legal_name} · {e.sector} · {e.sub_sector} · {e.registered_city},{" "}

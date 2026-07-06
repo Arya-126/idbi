@@ -16,6 +16,20 @@ export default function MlPanel({ ml }: { ml: MlAssessment }) {
           <span className="pill bg-ink-50 border border-ink-200 text-ink-500 text-[10px]">
             HistGB · trained on {ml.trained_on_n_samples} synthetic MSMEs
           </span>
+          {ml.monotonic_constraints && (
+            <span
+              className="pill bg-sky-50 border border-sky-200 text-sky-700 text-[10px]"
+              title="Every direction-known feature is monotonicity-constrained — the model provably cannot learn 'more bounces is safer'"
+            >
+              monotonic
+            </span>
+          )}
+          <span
+            className="pill bg-sky-50 border border-sky-200 text-sky-700 text-[10px]"
+            title="Probabilities are Platt-calibrated on a 5-fold split; Brier score measures probability quality on the holdout"
+          >
+            calibrated
+          </span>
         </div>
         <span
           className={clsx(
@@ -90,6 +104,9 @@ export default function MlPanel({ ml }: { ml: MlAssessment }) {
         model {ml.model_version}
         {ml.holdout_auc != null &&
           ` · holdout AUC ${ml.holdout_auc.toFixed(2)}`}
+        {ml.holdout_brier != null &&
+          ` · Brier ${ml.holdout_brier.toFixed(3)}`}
+        {` · ${ml.calibration}-calibrated`}
       </div>
     </section>
   );
