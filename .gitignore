@@ -36,6 +36,11 @@ coverage.xml
 .pytype/
 .ruff_cache/
 
+# Trained-model cache (reproducible from seed — see backend/app/ml.py)
+backend/.model_cache/
+# Observed score snapshots (demo-session history — see backend/app/snapshots.py)
+backend/.snapshots.json
+
 # ─── Node / Vite (frontend) ─────────────────────────────────────────────
 node_modules/
 .pnpm-store/
