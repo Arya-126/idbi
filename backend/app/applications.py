@@ -19,6 +19,7 @@ from .schemas import (
     ApplyRequest,
     EnterpriseIdentity,
     HealthCard,
+    KeyFactStatement,
     LoanApplication,
     SanctionLetter,
 )
@@ -104,12 +105,29 @@ def _issue_letter(
     processing_fee = int(app.amount_paise * 0.005)  # 0.5%
     monthly_emi = _emi_paise(app.amount_paise, app.roi_pct, app.tenor_months)
 
+    # Key Fact Statement per RBI Digital Lending Guidelines: the all-in cost
+    # of credit, stated before disbursal. APR folds the processing fee into
+    # the nominal rate, annualized over the tenor.
+    total_interest = max(0, monthly_emi * app.tenor_months - app.amount_paise)
+    fee_apr_component = (
+        (processing_fee / app.amount_paise) * (12 / app.tenor_months) * 100
+        if app.amount_paise > 0 and app.tenor_months > 0 else 0.0
+    )
+    kfs = KeyFactStatement(
+        apr_pct=round(app.roi_pct + fee_apr_component, 2),
+        total_interest_paise=total_interest,
+        processing_fee_paise=processing_fee,
+        total_cost_of_credit_paise=total_interest + processing_fee,
+        monthly_emi_paise=monthly_emi,
+        number_of_emis=app.tenor_months,
+    )
+
     covenants = [
-        f"Utilize the facility for working-capital / business purposes only.",
-        f"Maintain a minimum DSCR of 1.5× during the tenor.",
-        f"Route at least 60% of GST turnover through the sanctioning bank.",
-        f"Furnish quarterly GST + bank statement extracts via consented AA pull.",
-        f"Any bounce or default triggers immediate limit review.",
+        "Utilize the facility for working-capital / business purposes only.",
+        "Maintain a minimum DSCR of 1.5× during the tenor.",
+        "Route at least 60% of GST turnover through the sanctioning bank.",
+        "Furnish quarterly GST + bank statement extracts via consented AA pull.",
+        "Any bounce or default triggers immediate limit review.",
     ]
 
     letter = SanctionLetter(
@@ -125,6 +143,7 @@ def _issue_letter(
         issued_at=now,
         valid_until=now + timedelta(days=30),
         reference_number=f"IDBI-MSME-{app.application_id[-6:]}",
+        kfs=kfs,
     )
     _letters_by_id[letter.letter_id] = letter
     return letter

@@ -17,12 +17,34 @@ from datetime import date, datetime
 from . import personas
 from .personas import Persona
 from .portfolio import build_portfolio
-from .schemas import ImpactMetric, ImpactRow, ImpactSummary, PortfolioEntry
+from .schemas import (
+    ImpactMetric,
+    ImpactRow,
+    ImpactSummary,
+    InclusionSlice,
+    PortfolioEntry,
+)
+
+
+def _inclusion_slice(key: str, label: str, members: list[PortfolioEntry]) -> InclusionSlice:
+    n = len(members)
+    approved = [e for e in members if e.recommendation == "APPROVE"]
+    return InclusionSlice(
+        key=key,
+        label=label,
+        count=n,
+        approval_rate=round(len(approved) / n, 3) if n else 0.0,
+        avg_score=round(sum(e.composite_score for e in members) / n, 1) if n else 0.0,
+        avg_pd=round(sum(e.probability_of_default for e in members) / n, 4) if n else 0.0,
+        avg_limit_paise=(
+            sum(e.suggested_limit_paise for e in approved) // len(approved)
+            if approved else 0
+        ),
+    )
 
 
 _TRADITIONAL_MIN_TURNOVER_LAKHS = 12.0    # informal below this
 _TRADITIONAL_MIN_AGE_MONTHS = 24          # thin-file cutoff
-_TRADITIONAL_PD_LIFT_ESTIMATE_PP = 3.5    # from the additional rescued rows
 
 
 def _months_between(a: date, b: date) -> int:
@@ -79,16 +101,23 @@ def compute_impact() -> ImpactSummary:
     additional_exposure = 0
     ntc_ntb_included = 0
     rescued: list[ImpactRow] = []
+    # Verdict per entry, computed once and reused below (exposure + PD metrics).
+    verdicts: dict[str, tuple[str, str]] = {}
+    trad_book_pds: list[float] = []
+    alt_book_pds: list[float] = []
 
     for e in entries:
         persona = personas.get_persona(e.gstin)
         if persona is None:
             continue
         trad, reason = _traditional_verdict(persona)
+        verdicts[e.gstin] = (trad, reason)
         if trad == "APPROVE":
             trad_approvals += 1
+            trad_book_pds.append(e.probability_of_default)
         if e.recommendation == "APPROVE":
             alt_approvals += 1
+            alt_book_pds.append(e.probability_of_default)
         # "Rescued" — traditional would reject but alternate approves / refers.
         if trad == "REJECT" and e.recommendation in ("APPROVE", "REFER"):
             additional += 1
@@ -110,6 +139,14 @@ def compute_impact() -> ImpactSummary:
             ))
 
     total = len(entries)
+    # PD of each approved book, computed from the scored cards — not estimated.
+    # Including previously invisible borrowers usually lifts the average PD;
+    # the honest pitch is "we take a measured amount of extra risk to serve
+    # N more viable firms", so the sign is reported either way.
+    trad_avg_pd = sum(trad_book_pds) / len(trad_book_pds) if trad_book_pds else 0.0
+    alt_avg_pd = sum(alt_book_pds) / len(alt_book_pds) if alt_book_pds else 0.0
+    pd_lift_pp = (alt_avg_pd - trad_avg_pd) * 100
+
     metrics = [
         ImpactMetric(
             key="coverage",
@@ -133,23 +170,40 @@ def compute_impact() -> ImpactSummary:
             traditional=_fmt_paise(
                 sum(
                     e.suggested_limit_paise for e in entries
-                    if _traditional_verdict(personas.get_persona(e.gstin)  # type: ignore[arg-type]
-                                             )[0] == "APPROVE"
+                    if verdicts.get(e.gstin, ("REJECT", ""))[0] == "APPROVE"
                     and e.recommendation == "APPROVE"
                 )
             ),
             alternate=_fmt_paise(portfolio.total_exposure_paise),
             lift=f"+{_fmt_paise(additional_exposure)} unlocked",
             positive=True,
+            note=(
+                "Both sides priced at this system's suggested limits — a bureau "
+                "lender's own limits are unknowable for the demo book."
+            ),
         ),
         ImpactMetric(
             key="pd_lift",
-            label="Portfolio PD",
-            traditional=f"{portfolio.avg_pd * 100:.1f}%",
-            alternate=f"{(portfolio.avg_pd + _TRADITIONAL_PD_LIFT_ESTIMATE_PP / 100) * 100:.1f}%",
-            lift=f"+{_TRADITIONAL_PD_LIFT_ESTIMATE_PP:.1f} pp accepted for {additional} more borrowers",
-            positive=False,  # honest: including riskier NTC borrowers lifts the average PD
+            label="Avg PD of approved book",
+            traditional=f"{trad_avg_pd * 100:.1f}%",
+            alternate=f"{alt_avg_pd * 100:.1f}%",
+            lift=(
+                f"{pd_lift_pp:+.1f} pp accepted for {additional} more borrowers"
+                if pd_lift_pp > 0
+                else f"{pd_lift_pp:+.1f} pp — broader book, no extra risk"
+            ),
+            positive=pd_lift_pp <= 0,
+            note="Computed from ML PDs of each approved subset of the book.",
         ),
+    ]
+
+    # Inclusion dashboard: the credit-invisible cut vs the established cut,
+    # on identical metrics — the single-number KPI replaced with evidence.
+    invisible = [e for e in entries if e.is_ntc or e.is_ntb]
+    established = [e for e in entries if not (e.is_ntc or e.is_ntb)]
+    inclusion = [
+        _inclusion_slice("ntc_ntb", "Credit-invisible (NTC/NTB)", invisible),
+        _inclusion_slice("established", "Established borrowers", established),
     ]
 
     return ImpactSummary(
@@ -159,8 +213,9 @@ def compute_impact() -> ImpactSummary:
         additional_msmes_served=additional,
         ntc_ntb_included=ntc_ntb_included,
         additional_exposure_paise=additional_exposure,
-        estimated_default_rate_lift_pp=_TRADITIONAL_PD_LIFT_ESTIMATE_PP,
+        estimated_default_rate_lift_pp=round(pd_lift_pp, 2),
         metrics=metrics,
+        inclusion=inclusion,
         rescued_rows=sorted(rescued, key=lambda r: -r.alternate_limit_paise),
         generated_at=datetime.utcnow(),
     )
