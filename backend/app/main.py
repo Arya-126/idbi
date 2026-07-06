@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from datetime import datetime
 
@@ -102,6 +102,11 @@ def _warm_caches() -> None:
         build_portfolio()
 
     threading.Thread(target=warm, daemon=True, name="warmup").start()
+
+
+@app.get("/", include_in_schema=False)
+def _root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
